@@ -12,7 +12,7 @@ import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
 import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
-import MapWrapper from '@/components/map-wrapper'; // Added import for MapWrapper
+import MapWrapper from '@/components/map-wrapper';
 
 // Dynamically import react-leaflet components with ssr: false
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -65,110 +65,6 @@ const createCustomIcon = (
   });
 };
 
-const MapComponent = ({
-  center,
-  zoom,
-  cityTemperatures,
-  cityIconsState,
-  userLocation,
-  userSensorData,
-  userIconState,
-  isLoading,
-}: {
-  center: LatLngExpression;
-  zoom: number;
-  cityTemperatures: CityData[];
-  cityIconsState: Record<string, LeafletIconType>;
-  userLocation: Location | null;
-  userSensorData: SensorData | null;
-  userIconState: LeafletIconType | null;
-  isLoading: boolean;
-}) => {
-  // Create a stable key for MapContainer
-  // Using a unique but stable key for each user session is better than random keys
-  const mapKey = React.useMemo(() => {
-    // Create a session-stable key or use a simple string
-    return 'map-container';
-  }, []);
-
-  return (
-    <MapWrapper isLeafletLoaded={true} isLoading={isLoading}>
-      <MapContainer
-        key={mapKey}
-        center={center}
-        zoom={zoom}
-        scrollWheelZoom={true}
-        className="w-full h-full rounded-b-lg z-0"
-        style={{ backgroundColor: 'hsl(var(--muted))' }}
-        whenCreated={(map) => {
-          // Optional: Store map reference if needed
-          console.log("Map instance created");
-        }}
-      >
-        <MapUpdater center={center} zoom={zoom} />
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        />
-
-        {/* City Markers */}
-        {cityTemperatures.map((city) => (
-          cityIconsState[city.city] ? (
-            <Marker
-              key={city.city}
-              position={[city.lat, city.lng]}
-              icon={cityIconsState[city.city]}
-            >
-              <Popup>
-                <div className="p-1">
-                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
-                </div>
-              </Popup>
-            </Marker>
-          ) : (
-            <Marker key={city.city} position={[city.lat, city.lng]}>
-              <Popup>
-                <div className="p-1">
-                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                </div>
-              </Popup>
-            </Marker>
-          )
-        ))}
-
-        {/* User Location Marker */}
-        {userLocation && userSensorData && userSensorData.temperature !== null && userIconState && (
-          <Marker
-            key="user-location-marker"
-            position={[userLocation.lat, userLocation.lng]}
-            icon={userIconState}
-          >
-            <Popup>
-              <div className="p-1">
-                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-
-        {/* Fallback default marker for user if custom icon fails or temp is null */}
-        {userLocation && (!userIconState || (userSensorData && userSensorData.temperature === null)) && (
-          <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
-            <Popup>
-              <div className="p-1">
-                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-              </div>
-            </Popup>
-          </Marker>
-        )}
-      </MapContainer>
-    </MapWrapper>
-  );
-};
 
 const MapPage: React.FC = () => {
   const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
@@ -330,48 +226,46 @@ const MapPage: React.FC = () => {
     if (!isClient) return; // Only run on client
 
     const loadLeaflet = async () => {
-      if (typeof window !== 'undefined' && !window.L) {
-        try {
-          const leaflet = await import('leaflet');
-          window.L = leaflet;
+        // Ensure Leaflet and its assets are only loaded client-side
+        if (typeof window !== 'undefined') {
+          const L = (await import('leaflet')).default; // Dynamically import leaflet client-side
+          window.L = L; // Assign to window for compatibility if needed elsewhere
 
           // Apply compatibility fixes for default icons *after* L is assigned
-          delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-          window.L.Icon.Default.mergeOptions({
+          delete (L.Icon.Default.prototype as any)._getIconUrl;
+          L.Icon.Default.mergeOptions({
             iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
             iconUrl: '/_next/static/media/marker-icon.png',
             shadowUrl: '/_next/static/media/marker-shadow.png',
           });
 
-          // Import compatibility script only after Leaflet and fixes are loaded
+          // Dynamically import compatibility script only after Leaflet and fixes are loaded
           await import('leaflet-defaulticon-compatibility');
           setLeafletLoaded(true); // Mark Leaflet as fully loaded
           console.log("Leaflet and compatibility script loaded successfully.");
 
-        } catch (error) {
-          console.error("Failed to load Leaflet or compatibility script:", error);
+        } else {
+          console.error("Attempted to load Leaflet on server.");
           setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
-          setLoadingCities(false); // Stop loading indicators if Leaflet fails
+          setLoadingCities(false);
           setLoadingLocation(false);
           setLoadingSensor(false);
         }
-      } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
-        // Leaflet might exist from a previous render (Strict Mode) but wasn't marked as loaded
-        try {
-          await import('leaflet-defaulticon-compatibility'); // Ensure compatibility is run
-          setLeafletLoaded(true); // Mark as loaded
-          console.log("Leaflet compatibility ensured on subsequent render.");
-        } catch (error) {
-          console.error("Failed to ensure Leaflet compatibility script (retry):", error);
-          setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
-        }
-      } else if (window.L) {
-        setLeafletLoaded(true); // Already loaded
-      }
     };
 
-    loadLeaflet(); // Execute the load function
-  }, [isClient]); // Dependency only on isClient ensures this runs once when client becomes true
+
+     // Only attempt to load if not already loaded
+     if (!leafletLoaded && typeof window !== 'undefined' && !window.L) {
+        loadLeaflet().catch(error => {
+            console.error("Failed during Leaflet loading process:", error);
+             setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
+        });
+     } else if (typeof window !== 'undefined' && window.L) {
+         setLeafletLoaded(true); // Already loaded, possibly from previous render or strict mode
+         console.log("Leaflet already loaded, ensuring state is set.");
+     }
+
+  }, [isClient, leafletLoaded]); // Dependency ensures this logic runs when client becomes true or leafletLoaded changes
 
   // Third useEffect: Fetch data *only* after Leaflet is loaded
   useEffect(() => {
@@ -386,7 +280,7 @@ const MapPage: React.FC = () => {
   // Fourth useEffect: Update icons when data or Leaflet state changes
   useEffect(() => {
     // Only create icons on the client when Leaflet is fully loaded
-    if (isClient && leafletLoaded && window.L) {
+    if (isClient && leafletLoaded) {
       console.log("Updating map icons based on data change.");
       // Create city icons
       const icons = cityTemperatures.reduce((acc, city) => {
@@ -439,96 +333,6 @@ const MapPage: React.FC = () => {
 
   const isLoading = loadingCities || loadingLocation || loadingSensor;
 
-  // Render skeleton or map based on loading state and client/leaflet readiness
-  const renderMapOrSkeleton = () => {
-    // Show initial skeleton on server or before client/leaflet is ready
-    if (!isClient || !leafletLoaded) {
-      console.log("Rendering Initial Skeleton: isClient =", isClient, ", leafletLoaded =", leafletLoaded);
-      return (
-        <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg bg-muted/80 flex items-center justify-center">
-          <p>Loading Map...</p>
-        </Skeleton>
-      );
-    }
-
-     // Avoid using the `ref` prop directly on MapContainer as it can cause issues with dynamic imports and StrictMode
-     return (
-           <MapContainer
-             center={mapCenter}
-             zoom={mapZoom}
-             scrollWheelZoom={true}
-             className="w-full h-full rounded-b-lg z-0"
-             style={{ backgroundColor: 'hsl(var(--muted))' }}
-              whenCreated={instance => { mapRef.current = instance; }} // Assign map instance to ref
-           >
-             {isLoading && (
-               <div className="absolute inset-0 w-full h-full rounded-b-lg z-10 bg-muted/80 flex items-center justify-center">
-                 <p>Updating Data...</p>
-               </div>
-             )}
-             <MapUpdater center={mapCenter} zoom={mapZoom} />
-             <TileLayer
-               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-               url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-             />
-
-             {/* City Markers */}
-             {cityTemperatures.map((city) => (
-               cityIconsState[city.city] ? (
-                 <Marker
-                   key={city.city}
-                   position={[city.lat, city.lng]}
-                   icon={cityIconsState[city.city]}
-                 >
-                   <Popup>
-                     <div className="p-1">
-                       <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                       <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
-                     </div>
-                   </Popup>
-                 </Marker>
-               ) : (
-                 <Marker key={city.city} position={[city.lat, city.lng]}>
-                   <Popup>
-                     <div className="p-1">
-                       <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                       <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                     </div>
-                   </Popup>
-                 </Marker>
-               )
-             ))}
-
-             {/* User Location Marker */}
-             {userLocation && userSensorData && userSensorData.temperature !== null && userIconState && (
-               <Marker
-                 key="user-location-marker"
-                 position={[userLocation.lat, userLocation.lng]}
-                 icon={userIconState}
-               >
-                 <Popup>
-                   <div className="p-1">
-                     <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                     <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
-                   </div>
-                 </Popup>
-               </Marker>
-             )}
-
-             {/* Fallback default marker for user if custom icon fails or temp is null */}
-             {userLocation && (!userIconState || (userSensorData && userSensorData.temperature === null)) && (
-               <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
-                 <Popup>
-                   <div className="p-1">
-                     <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                     <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                   </div>
-                 </Popup>
-               </Marker>
-             )}
-           </MapContainer>
-     );
-   };
 
   // Main render structure
   return (
@@ -550,7 +354,79 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-            {renderMapOrSkeleton()}
+             <MapWrapper isLeafletLoaded={isClient && leafletLoaded} isLoading={isLoading}>
+                {isClient && leafletLoaded && MapContainer && (
+                   <MapContainer
+                     center={mapCenter}
+                     zoom={mapZoom}
+                     scrollWheelZoom={true}
+                     className="w-full h-full rounded-b-lg z-0"
+                     style={{ backgroundColor: 'hsl(var(--muted))' }}
+                     whenCreated={instance => { mapRef.current = instance; }} // Assign map instance to ref
+                   >
+                     <MapUpdater center={mapCenter} zoom={mapZoom} />
+                     <TileLayer
+                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                       url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                     />
+
+                     {/* City Markers */}
+                     {cityTemperatures.map((city) => (
+                       cityIconsState[city.city] ? (
+                         <Marker
+                           key={city.city}
+                           position={[city.lat, city.lng]}
+                           icon={cityIconsState[city.city]}
+                         >
+                           <Popup>
+                             <div className="p-1">
+                               <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                               <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                             </div>
+                           </Popup>
+                         </Marker>
+                       ) : (
+                         <Marker key={city.city} position={[city.lat, city.lng]}>
+                           <Popup>
+                             <div className="p-1">
+                               <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                               <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                             </div>
+                           </Popup>
+                         </Marker>
+                       )
+                     ))}
+
+                     {/* User Location Marker */}
+                     {userLocation && userSensorData && userSensorData.temperature !== null && userIconState && (
+                       <Marker
+                         key="user-location-marker"
+                         position={[userLocation.lat, userLocation.lng]}
+                         icon={userIconState}
+                       >
+                         <Popup>
+                           <div className="p-1">
+                             <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                             <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+                           </div>
+                         </Popup>
+                       </Marker>
+                     )}
+
+                     {/* Fallback default marker for user if custom icon fails or temp is null */}
+                     {userLocation && (!userIconState || (userSensorData && userSensorData.temperature === null)) && (
+                       <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
+                         <Popup>
+                           <div className="p-1">
+                             <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                             <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                           </div>
+                         </Popup>
+                       </Marker>
+                     )}
+                   </MapContainer>
+                )}
+            </MapWrapper>
           </CardContent>
         </Card>
 
