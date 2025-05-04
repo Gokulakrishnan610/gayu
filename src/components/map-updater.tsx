@@ -1,3 +1,4 @@
+
 // src/components/map-updater.tsx
 'use client';
 
