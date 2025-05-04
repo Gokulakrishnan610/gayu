@@ -12,8 +12,6 @@ import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
 import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
-// Removed MapWrapper import
-// import MapWrapper from '@/components/map-wrapper';
 
 // Dynamically import react-leaflet components with ssr: false
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -356,84 +354,87 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-             {/* Simplified conditional rendering: Show Skeleton or MapContainer */}
-             {isLoading || !isClient || !leafletLoaded ? (
-                <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg flex items-center justify-center bg-muted/80">
-                  <p>Loading Map...</p>
-                </Skeleton>
-             ) : (
-                MapContainer && ( // Ensure MapContainer is loaded
-                   <MapContainer
-                     center={mapCenter}
-                     zoom={mapZoom}
-                     scrollWheelZoom={true}
-                     className="w-full h-full rounded-b-lg z-0"
-                     style={{ backgroundColor: 'hsl(var(--muted))' }}
-                     whenCreated={instance => { mapRef.current = instance; }} // Assign map instance to ref
-                   >
-                     <MapUpdater center={mapCenter} zoom={mapZoom} />
-                     <TileLayer
-                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                       url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                     />
+             {/* Wrapper div that is always present */}
+             <div className="absolute inset-0 w-full h-full rounded-b-lg">
+               {/* Conditionally render MapContainer or Skeleton inside the wrapper */}
+               {!isClient || !leafletLoaded ? (
+                   <Skeleton className="w-full h-full flex items-center justify-center bg-muted/80">
+                     <p>Loading Map...</p>
+                   </Skeleton>
+                ) : (
+                   MapContainer && ( // Ensure MapContainer is loaded
+                      <MapContainer
+                        center={mapCenter}
+                        zoom={mapZoom}
+                        scrollWheelZoom={true}
+                        className="w-full h-full z-0" // Ensure z-index is lower than potential overlays
+                        style={{ backgroundColor: 'hsl(var(--muted))' }}
+                        whenCreated={instance => { mapRef.current = instance; }} // Assign map instance to ref
+                      >
+                        <MapUpdater center={mapCenter} zoom={mapZoom} />
+                        <TileLayer
+                          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                        />
 
-                     {/* City Markers */}
-                     {cityTemperatures.map((city) => {
-                       const icon = cityIconsState[city.city];
-                       return icon ? (
-                         <Marker
-                           key={city.city}
-                           position={[city.lat, city.lng]}
-                           icon={icon}
-                         >
-                           <Popup>
-                             <div className="p-1">
-                               <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                               <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
-                             </div>
-                           </Popup>
-                         </Marker>
-                       ) : (
-                         // Fallback default marker if custom icon failed
-                         <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
+                        {/* City Markers */}
+                        {cityTemperatures.map((city) => {
+                          const icon = cityIconsState[city.city];
+                          return icon ? (
+                            <Marker
+                              key={city.city}
+                              position={[city.lat, city.lng]}
+                              icon={icon}
+                            >
+                              <Popup>
+                                <div className="p-1">
+                                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                                </div>
+                              </Popup>
+                            </Marker>
+                          ) : (
+                            // Fallback default marker if custom icon failed
+                            <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
+                               <Popup>
+                                <div className="p-1">
+                                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                                </div>
+                              </Popup>
+                            </Marker>
+                          );
+                        })}
+
+
+                        {/* User Location Marker */}
+                        {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
+                          <Marker
+                            key="user-location-marker"
+                            position={[userLocation.lat, userLocation.lng]}
+                            icon={userIconState}
+                          >
                             <Popup>
-                             <div className="p-1">
-                               <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                               <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                             </div>
-                           </Popup>
-                         </Marker>
-                       );
-                     })}
-
-
-                     {/* User Location Marker */}
-                     {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
-                       <Marker
-                         key="user-location-marker"
-                         position={[userLocation.lat, userLocation.lng]}
-                         icon={userIconState}
-                       >
-                         <Popup>
-                           <div className="p-1">
-                             <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                             <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
-                           </div>
-                         </Popup>
-                       </Marker>
-                     ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
-                       <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
-                         <Popup>
-                           <div className="p-1">
-                             <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                             <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                           </div>
-                         </Popup>
-                       </Marker>
-                     ) : null}
-                   </MapContainer>
-                )
-             )}
+                              <div className="p-1">
+                                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+                              </div>
+                            </Popup>
+                          </Marker>
+                        ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
+                          <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
+                            <Popup>
+                              <div className="p-1">
+                                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                              </div>
+                            </Popup>
+                          </Marker>
+                        ) : null}
+                      </MapContainer>
+                   )
+                )}
+             </div>
           </CardContent>
         </Card>
 
@@ -487,3 +488,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
+    
