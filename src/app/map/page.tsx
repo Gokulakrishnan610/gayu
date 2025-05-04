@@ -72,12 +72,9 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  // Removed mapInstanceKey state
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
-    // Keep existing error if it's critical (like Leaflet load failure)
-    // setError(null); // Don't clear critical errors
     try {
       const temperaturePromises = CITIES.map(city => getCityTemperature(city.name));
       const results = await Promise.all(temperaturePromises);
@@ -89,7 +86,7 @@ const MapPage: React.FC = () => {
       setCityTemperatures(dataWithCoords);
     } catch (err) {
       console.error('Error fetching city temperatures:', err);
-      setError((prev) => prev || 'Failed to fetch city temperatures. Please try again later.'); // Prioritize existing error
+      setError((prev) => prev || 'Failed to fetch city temperatures. Please try again later.');
     } finally {
       setLoadingCities(false);
     }
@@ -98,111 +95,57 @@ const MapPage: React.FC = () => {
   const fetchUserLocationAndSensor = async () => {
     setLoadingLocation(true);
     setLoadingSensor(true);
-    // Keep existing error if critical
-    // setError(null);
+
     try {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const location: Location = { lat: position.coords.latitude, lng: position.coords.longitude };
             setUserLocation(location);
-            setMapCenter([location.lat, location.lng]); // Update map center
-            setMapZoom(10); // Zoom in closer to user location
+            setMapCenter([location.lat, location.lng]);
+            setMapZoom(10);
             setLoadingLocation(false);
-
-            try {
-              // Fetch sensor data based on stored IP or fallback to mock
-              const storedIp = localStorage.getItem('sensorIp');
-              let sensorData: SensorData;
-              if (storedIp) {
-                  try {
-                      const response = await fetch(`http://${storedIp}/data`);
-                      if (!response.ok) throw new Error('Failed to fetch from sensor IP');
-                      sensorData = await response.json();
-                  } catch (ipErr) {
-                      console.warn(`Failed fetching from ${storedIp}, using mock data.`, ipErr);
-                      sensorData = await getSensorData(); // Fallback
-                      setError((prev) => prev ? `${prev} Sensor connection failed.` : 'Sensor connection failed.');
-                  }
-              } else {
-                  sensorData = await getSensorData(); // Use mock if no IP
-              }
-               // Basic validation
-               const validatedData: SensorData = {
-                 temperature: typeof sensorData.temperature === 'number' ? sensorData.temperature : null,
-                 humidity: typeof sensorData.humidity === 'number' ? sensorData.humidity : null,
-               };
-              setUserSensorData(validatedData);
-
-            } catch (sensorErr) {
-              console.error('Error fetching user sensor data (after geo):', sensorErr);
-              setError((prev) => prev ? `${prev} Failed to fetch your sensor data.` : 'Failed to fetch your sensor data.');
-               try {
-                 const mockSensorData = await getSensorData(); // Fallback to mock on error
-                  setUserSensorData(mockSensorData);
-               } catch (mockErr) {
-                  console.error('Failed fetching mock sensor data:', mockErr);
-                  setUserSensorData({ temperature: null, humidity: null });
-               }
-            } finally {
-              setLoadingSensor(false);
-            }
+            await fetchSensorDataForLocation(); // Fetch sensor after getting location
           },
           async (geoError) => {
             console.warn('Geolocation error:', geoError.message, 'Falling back to API.');
-            await fetchLocationAndSensorFromAPI();
+            await fetchLocationAndSensorFromAPI(); // Fallback includes sensor fetch
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
         );
       } else {
         console.warn('Geolocation not supported, falling back to API.');
-        await fetchLocationAndSensorFromAPI();
+        await fetchLocationAndSensorFromAPI(); // Fallback includes sensor fetch
       }
     } catch (err) {
        console.error('General error fetching location/sensor:', err);
-       setError((prev) => prev || 'Failed to determine your location or fetch sensor data.'); // Prioritize existing error
-       setLoadingLocation(false);
+       setError((prev) => prev || 'Failed to determine your location or fetch sensor data.');
+       setLoadingLocation(false); // Ensure loading states are updated on error
        setLoadingSensor(false);
         // Attempt to load mock sensor data even if location fails
-        try {
-          const mockSensorData = await getSensorData();
-          setUserSensorData(mockSensorData);
-        } catch (mockErr) {
-          console.error('Failed fetching mock sensor data after primary error:', mockErr);
-          setUserSensorData({ temperature: null, humidity: null });
-        }
+        await fetchSensorDataForLocation(true); // Force mock data fetch
     }
   };
 
-  const fetchLocationAndSensorFromAPI = async () => {
+ const fetchSensorDataForLocation = async (forceMock = false) => {
+    setLoadingSensor(true); // Ensure loading sensor state is true at the start
     try {
-      const location = await getCurrentLocation(); // API fallback for location
-      setUserLocation(location);
-      setMapCenter([location.lat, location.lng]); // Update map center from API
-      setMapZoom(10); // Zoom in closer
-    } catch (locError) {
-        console.error('Error fetching location from API:', locError);
-        setError((prev) => prev ? `${prev} Failed to retrieve location.` : 'Failed to retrieve location.');
-    } finally {
-        setLoadingLocation(false); // Location attempt (geo or API) finished
-    }
-
-     try {
-       // Fetch sensor data based on stored IP or fallback to mock (independent of location fetch)
         const storedIp = localStorage.getItem('sensorIp');
         let sensorData: SensorData;
-         if (storedIp) {
+        let connectionError = null;
+
+         if (storedIp && !forceMock) {
            try {
                const response = await fetch(`http://${storedIp}/data`);
                if (!response.ok) throw new Error('Failed to fetch from sensor IP');
                sensorData = await response.json();
            } catch (ipErr) {
                console.warn(`Failed fetching from ${storedIp}, using mock data.`, ipErr);
-               sensorData = await getSensorData(); // Fallback
-               setError((prev) => prev ? `${prev} Sensor connection failed.` : 'Sensor connection failed.');
+               sensorData = await getSensorData(); // Fallback to mock
+               connectionError = 'Sensor connection failed.'; // Set specific error message
            }
         } else {
-           sensorData = await getSensorData(); // Use mock if no IP
+           sensorData = await getSensorData(); // Use mock if no IP or forced
         }
 
        // Basic validation
@@ -211,8 +154,11 @@ const MapPage: React.FC = () => {
          humidity: typeof sensorData.humidity === 'number' ? sensorData.humidity : null,
        };
         setUserSensorData(validatedData);
+         if (connectionError) {
+             setError((prev) => prev ? `${prev} ${connectionError}` : connectionError);
+         }
      } catch (sensorErr) {
-       console.error('Error fetching sensor data (API fallback path):', sensorErr);
+       console.error('Error fetching sensor data:', sensorErr);
        setError((prev) => prev ? `${prev} Failed to fetch sensor data.` : 'Failed to fetch sensor data.');
         try {
            const mockSensorData = await getSensorData(); // Fallback to mock on error
@@ -224,6 +170,25 @@ const MapPage: React.FC = () => {
      } finally {
        setLoadingSensor(false); // Sensor attempt finished
      }
+ }
+
+
+  const fetchLocationAndSensorFromAPI = async () => {
+    // Try fetching location from API
+    try {
+      const location = await getCurrentLocation();
+      setUserLocation(location);
+      setMapCenter([location.lat, location.lng]);
+      setMapZoom(10);
+    } catch (locError) {
+        console.error('Error fetching location from API:', locError);
+        setError((prev) => prev ? `${prev} Failed to retrieve location.` : 'Failed to retrieve location.');
+    } finally {
+        setLoadingLocation(false); // Location attempt (geo or API) finished
+    }
+
+    // Always attempt to fetch sensor data after location attempt (success or fail)
+    await fetchSensorDataForLocation();
   };
 
 
@@ -234,10 +199,19 @@ const MapPage: React.FC = () => {
     Promise.all([
       import('leaflet'),
       import('leaflet-defaulticon-compatibility') // Import JS part dynamically
-    ]).then(([leaflet, _]) => {
+    ]).then(([leaflet, compatibility]) => {
       L = leaflet;
-      // leaflet-defaulticon-compatibility handles default icon paths
-      setLeafletLoaded(true); // Mark Leaflet as loaded
+      // Apply compatibility fixes for default icons AFTER L is loaded
+      // This might involve re-setting some default options if needed,
+      // but leaflet-defaulticon-compatibility should handle the basics.
+      delete (L.Icon.Default.prototype as any)._getIconUrl;
+      L.Icon.Default.mergeOptions({
+          iconRetinaUrl: '/_next/static/media/marker-icon-2x.7a5e54a1.png', // Correct path via Next.js build
+          iconUrl: '/_next/static/media/marker-icon.a6931a99.png',       // Correct path via Next.js build
+          shadowUrl: '/_next/static/media/marker-shadow.d7400fd9.png',   // Correct path via Next.js build
+      });
+
+      setLeafletLoaded(true); // Mark Leaflet as loaded *after* setup
       // Data fetching can now happen as Leaflet is available
       fetchCityTemperatures();
       fetchUserLocationAndSensor();
@@ -249,7 +223,6 @@ const MapPage: React.FC = () => {
          setLoadingSensor(false);
     });
 
-    // Cleanup function is not strictly necessary for mapInstanceKey anymore
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array ensures this runs once on mount
 
@@ -300,7 +273,7 @@ const MapPage: React.FC = () => {
 
   const isLoading = loadingCities || loadingLocation || loadingSensor || !leafletLoaded; // Include leafletLoaded in loading state
 
-  // Render nothing or a placeholder on the server
+  // Render nothing or a placeholder on the server or before client fully loads
   if (!isClient) {
     return (
         <div className="container mx-auto p-4 md:p-8">
