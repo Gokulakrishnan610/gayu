@@ -262,7 +262,7 @@ const MapPage: React.FC = () => {
            }
        });
 
-   }, [isClient]); // Run only when isClient becomes true
+   }, [isClient, fetchCityTemperatures, fetchUserLocationAndSensor, cityTemperatures.length, userLocation, userSensorData, leafletLoaded]); // Added dependencies to re-run if initial fetch failed
 
    // Third useEffect: Update icons when data or Leaflet state changes
    useEffect(() => {
@@ -339,8 +339,9 @@ const MapPage: React.FC = () => {
 
   // Render skeleton or map based on loading state and client/leaflet readiness
   const renderMapOrSkeleton = () => {
+    // Show initial skeleton on server or before client/leaflet is ready
     if (!isClient || !leafletLoaded) {
-        console.log("Rendering Skeleton: isClient =", isClient, ", leafletLoaded =", leafletLoaded);
+        console.log("Rendering Initial Skeleton: isClient =", isClient, ", leafletLoaded =", leafletLoaded);
         return (
             <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg bg-muted/80 flex items-center justify-center">
             <p>Loading Map...</p>
@@ -348,7 +349,7 @@ const MapPage: React.FC = () => {
         );
     }
 
-     // Only render MapContainer if not loading and on client + leaflet loaded
+     // On the client, always render the MapContainer, but overlay a skeleton if data is loading
      return (
            <MapContainer
              center={mapCenter}
@@ -356,13 +357,13 @@ const MapPage: React.FC = () => {
              scrollWheelZoom={true}
              className="w-full h-full rounded-b-lg z-0"
              style={{ backgroundColor: 'hsl(var(--muted))' }}
-             whenCreated={mapInstance => { // Use whenCreated instead of ref for initialization
-                if (!mapRef.current) { // Prevent re-assigning if already set
+             whenCreated={mapInstance => { // Use whenCreated to get the map instance
+                if (!mapRef.current) { // Prevent re-assigning if already set (due to StrictMode)
                    console.log("Map instance created via whenCreated.");
                    mapRef.current = mapInstance;
                 }
              }}
-             // whenReady is less common, use whenCreated for initial setup
+             // Removed mapRef prop to avoid potential conflicts with whenCreated
            >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
              <TileLayer
@@ -509,3 +510,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
+    
