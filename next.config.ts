@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Remove @vis.gl/react-google-maps from transpilePackages if it exists
+  // transpilePackages: ['@vis.gl/react-google-maps'] <--- Remove this line if present
 };
 
 export default nextConfig;

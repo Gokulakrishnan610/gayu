@@ -1,18 +1,24 @@
 
-// src/app/map/page.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Map, Marker, InfoWindow, useMapsLibrary } from '@vis.gl/react-google-maps';
-import type { MapSymbol } from '@vis.gl/react-google-maps'; // Import MapSymbol type
+import dynamic from 'next/dynamic';
+import L from 'leaflet'; // Import Leaflet library
+import type { LatLngExpression, Icon } from 'leaflet'; // Import Leaflet types
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
 import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
 import { getCurrentLocation, Location } from '@/services/location';
-import { getSensorData, SensorData } from '@/services/sensor'; // Import sensor data function
-import { useMapsContext } from '@/contexts/maps-context'; // Import the context hook
+import { getSensorData, SensorData } from '@/services/sensor';
+
+// Dynamically import react-leaflet components to avoid SSR issues
+const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
+const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
+const MapUpdater = dynamic(() => import('@/components/map-updater'), { ssr: false }); // Helper component to update map view
 
 interface CityData extends CityTemperature {
   lat: number;
@@ -29,30 +35,35 @@ const CITIES = [
   { name: 'Cairo', lat: 30.0444, lng: 31.2357 },
 ];
 
+// Define custom Leaflet icons using L.divIcon for better styling control
+const createCustomIcon = (
+    temperature: number,
+    color: 'primary' | 'accent',
+    size: number = 32, // Default size
+    fontSize: number = 11,
+    textColor: 'primary-foreground' | 'accent-foreground' = 'accent-foreground'
+): Icon => {
+    const bgColorClass = color === 'primary' ? 'bg-primary' : 'bg-accent';
+    const textColorClass = color === 'primary' ? 'text-primary-foreground' : 'text-accent-foreground';
+
+    return L.divIcon({
+        html: `<div class="${bgColorClass} ${textColorClass} rounded-full flex items-center justify-center shadow" style="width: ${size}px; height: ${size}px; font-size: ${fontSize}px; font-weight: bold;">${temperature.toFixed(0)}°</div>`,
+        className: '', // Important to clear default Leaflet icon styles
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2], // Center the icon
+    });
+};
+
 const MapPage: React.FC = () => {
-  const { isMapsApiAvailable } = useMapsContext(); // Use the context hook
   const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [userSensorData, setUserSensorData] = useState<SensorData | null>(null);
-  const [selectedCity, setSelectedCity] = useState<CityData | null>(null);
   const [loadingCities, setLoadingCities] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [loadingSensor, setLoadingSensor] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mapCenter, setMapCenter] = useState({ lat: 20, lng: 0 }); // Default center
-
-  // Load the 'marker' library which includes SymbolPath - only if API is available
-  const mapsLibrary = useMapsLibrary(isMapsApiAvailable ? 'marker' : null);
-  const [SymbolPath, setSymbolPath] = useState<typeof google.maps.SymbolPath | null>(null);
-
-
-  useEffect(() => {
-    // Ensure maps library is loaded and SymbolPath is available before setting state
-    if (mapsLibrary && mapsLibrary.SymbolPath) {
-      setSymbolPath(mapsLibrary.SymbolPath);
-    }
-  }, [mapsLibrary]);
-
+  const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center for Leaflet
+  const [mapZoom, setMapZoom] = useState(3); // Default zoom
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -79,32 +90,27 @@ const MapPage: React.FC = () => {
     setLoadingSensor(true);
     setError(null);
     try {
-      // Use browser geolocation first if available
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           async (position) => {
-            const location = { lat: position.coords.latitude, lng: position.coords.longitude };
+            const location: Location = { lat: position.coords.latitude, lng: position.coords.longitude };
             setUserLocation(location);
-             if (isMapsApiAvailable) { // Only center map if API is available
-               setMapCenter(location);
-             }
+            setMapCenter([location.lat, location.lng]); // Update map center
+            setMapZoom(10); // Zoom in closer to user location
             setLoadingLocation(false);
 
-            // Now fetch sensor data
-             try {
-                const sensorData = await getSensorData();
-                setUserSensorData(sensorData);
-             } catch (sensorErr) {
-                console.error('Error fetching user sensor data:', sensorErr);
-                setError((prev) => prev ? `${prev} Failed to fetch your sensor data.` : 'Failed to fetch your sensor data.');
-             } finally {
-                setLoadingSensor(false);
-             }
-
+            try {
+              const sensorData = await getSensorData();
+              setUserSensorData(sensorData);
+            } catch (sensorErr) {
+              console.error('Error fetching user sensor data:', sensorErr);
+              setError((prev) => prev ? `${prev} Failed to fetch your sensor data.` : 'Failed to fetch your sensor data.');
+            } finally {
+              setLoadingSensor(false);
+            }
           },
           async (geoError) => {
             console.warn('Geolocation error:', geoError.message, 'Falling back to API.');
-            // Fallback to API if geolocation fails or is denied
             await fetchLocationAndSensorFromAPI();
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
@@ -121,43 +127,39 @@ const MapPage: React.FC = () => {
     }
   };
 
-   // Helper function for API fallback
-   const fetchLocationAndSensorFromAPI = async () => {
-     try {
-       const [location, sensorData] = await Promise.all([
-         getCurrentLocation(), // Assumes this service exists and works
-         getSensorData()
-       ]);
-       setUserLocation(location);
-       setUserSensorData(sensorData);
-        if (isMapsApiAvailable) { // Only center map if API is available
-            setMapCenter(location);
-        }
-     } catch (apiError) {
-       console.error('Error fetching location/sensor from API:', apiError);
-       setError('Could not retrieve location or sensor data from backup services.');
-     } finally {
-        setLoadingLocation(false);
-        setLoadingSensor(false);
-     }
-   };
-
+  const fetchLocationAndSensorFromAPI = async () => {
+    try {
+      const [location, sensorData] = await Promise.all([
+        getCurrentLocation(),
+        getSensorData()
+      ]);
+      setUserLocation(location);
+      setUserSensorData(sensorData);
+      setMapCenter([location.lat, location.lng]); // Update map center from API
+       setMapZoom(10); // Zoom in closer
+    } catch (apiError) {
+      console.error('Error fetching location/sensor from API:', apiError);
+      setError('Could not retrieve location or sensor data from backup services.');
+    } finally {
+       setLoadingLocation(false);
+       setLoadingSensor(false);
+    }
+  };
 
   useEffect(() => {
     fetchCityTemperatures();
     fetchUserLocationAndSensor();
-     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Keep dependencies minimal for initial fetch
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0) return null;
 
-    // Find the nearest city (simple distance calculation, can be improved)
     let nearestCity: CityData | null = null;
     let minDistance = Infinity;
 
     cityTemperatures.forEach(city => {
-      if (!userLocation) return; // Guard against null userLocation
+      if (!userLocation) return;
       const distance = Math.sqrt(
         Math.pow(userLocation.lat - city.lat, 2) + Math.pow(userLocation.lng - city.lng, 2)
       );
@@ -167,7 +169,7 @@ const MapPage: React.FC = () => {
       }
     });
 
-    if (!nearestCity || !userSensorData) return null; // Guard against null values
+    if (!nearestCity || !userSensorData) return null;
 
     const diff = userSensorData.temperature - nearestCity.temperature;
     return {
@@ -177,38 +179,18 @@ const MapPage: React.FC = () => {
     };
   }, [userLocation, userSensorData, cityTemperatures]);
 
-  const handleMarkerClick = (city: CityData) => {
-      setSelectedCity(city);
-   };
+  // Memoize icons to prevent recreation on every render
+  const cityIcons = useMemo(() => {
+      return cityTemperatures.reduce((acc, city) => {
+          acc[city.city] = createCustomIcon(city.temperature, 'accent', 30, 10);
+          return acc;
+      }, {} as Record<string, Icon>);
+  }, [cityTemperatures]);
 
-   const handleInfoWindowClose = () => {
-      setSelectedCity(null);
-   };
-
-   // Define marker options using useMemo, dependent on SymbolPath being loaded
-    const cityMarkerIcon = useMemo((): MapSymbol | null => {
-        if (!SymbolPath) return null;
-        return {
-            path: SymbolPath.CIRCLE,
-            fillColor: 'hsl(var(--accent))',
-            fillOpacity: 0.8,
-            strokeColor: 'hsl(var(--foreground))',
-            strokeWeight: 1,
-            scale: 8,
-        };
-    }, [SymbolPath]);
-
-    const userMarkerIcon = useMemo((): MapSymbol | null => {
-        if (!SymbolPath) return null;
-        return {
-            path: SymbolPath.CIRCLE, // Use the loaded SymbolPath
-            fillColor: 'hsl(var(--primary))',
-            fillOpacity: 1,
-            strokeColor: 'hsl(var(--primary-foreground))',
-            strokeWeight: 2,
-            scale: 10,
-        };
-    }, [SymbolPath]);
+  const userIcon = useMemo(() => {
+      if (!userSensorData) return null;
+      return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
+  }, [userSensorData]);
 
 
   return (
@@ -229,71 +211,56 @@ const MapPage: React.FC = () => {
             <CardTitle>Temperature Overview</CardTitle>
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
-          <CardContent className="h-[500px] p-0">
-             {/* Show message if API key is missing */}
-              {!isMapsApiAvailable ? (
-                 <div className="flex items-center justify-center h-full w-full bg-muted rounded-b-lg">
-                    <p className="text-muted-foreground">Map disabled. Google Maps API Key is missing.</p>
-                 </div>
-              ) : (loadingLocation || loadingCities || !SymbolPath) ? ( // Show skeleton while loading data or library
-                <Skeleton className="h-full w-full" />
+          <CardContent className="h-[500px] p-0 relative"> {/* Added relative positioning */}
+             {loadingLocation || loadingCities ? (
+                <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" /> // Use absolute positioning for Skeleton
               ) : (
-                <Map
-                  mapId={'ecosense-map'} // Optional: for custom styling
-                  defaultCenter={mapCenter}
-                  defaultZoom={3}
-                  gestureHandling={'greedy'}
-                  disableDefaultUI={true}
-                  className="w-full h-full rounded-b-lg"
+                <MapContainer
+                  center={mapCenter}
+                  zoom={mapZoom}
+                  scrollWheelZoom={true} // Enable scroll wheel zoom
+                  className="w-full h-full rounded-b-lg z-0" // Ensure MapContainer has z-index 0
+                  style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
                 >
-                  {/* City Markers - Only render if icon is ready */}
-                  {cityMarkerIcon && cityTemperatures.map((city) => (
-                    <Marker
-                      key={city.city}
-                      position={{ lat: city.lat, lng: city.lng }}
-                      title={`${city.city}: ${city.temperature}°C`}
-                      onClick={() => handleMarkerClick(city)}
-                      icon={cityMarkerIcon} // Use the memoized icon object
-                      label={{
-                         text: `${city.temperature.toFixed(0)}°`,
-                         color: 'hsl(var(--accent-foreground))', // Ensure contrast
-                         fontSize: '10px',
-                         fontWeight: 'bold',
-                       }}
+                 <MapUpdater center={mapCenter} zoom={mapZoom} />
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  />
 
-                    />
+                  {/* City Markers */}
+                  {cityTemperatures.map((city) => (
+                    cityIcons[city.city] && ( // Ensure icon exists
+                        <Marker
+                          key={city.city}
+                          position={[city.lat, city.lng]}
+                          icon={cityIcons[city.city]}
+                        >
+                            <Popup>
+                                <div className="p-1">
+                                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                                </div>
+                            </Popup>
+                        </Marker>
+                    )
                   ))}
 
-                  {/* User Location Marker - Only render if icon is ready */}
-                  {userLocation && userSensorData && userMarkerIcon && (
+                  {/* User Location Marker */}
+                  {userLocation && userSensorData && userIcon && (
                       <Marker
-                        position={userLocation}
-                        title={`Your Location: ${userSensorData.temperature}°C`}
-                        icon={userMarkerIcon} // Use the memoized icon object
-                        label={{
-                           text: `${userSensorData.temperature.toFixed(0)}°`,
-                           color: 'hsl(var(--primary-foreground))',
-                           fontSize: '11px',
-                           fontWeight: 'bold',
-                         }}
-                      />
-                  )}
-                   {/* Info Window for Selected City */}
-                    {selectedCity && (
-                      <InfoWindow
-                        position={{ lat: selectedCity.lat, lng: selectedCity.lng }}
-                        onCloseClick={handleInfoWindowClose}
-                        // Options to prevent map panning when info window opens
-                         // disableAutoPan={true}
+                        position={[userLocation.lat, userLocation.lng]}
+                        icon={userIcon}
                       >
-                        <div className="p-1">
-                          <h4 className="font-semibold text-sm mb-1">{selectedCity.city}</h4>
-                          <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{selectedCity.temperature.toFixed(1)}°C</p>
-                        </div>
-                      </InfoWindow>
-                    )}
-
-                </Map>
+                        <Popup>
+                            <div className="p-1">
+                              <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                              <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+                            </div>
+                        </Popup>
+                      </Marker>
+                  )}
+                </MapContainer>
               )}
           </CardContent>
         </Card>
