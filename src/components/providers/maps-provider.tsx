@@ -1,3 +1,4 @@
+
 'use client';
 
 import React from 'react';
@@ -11,7 +12,7 @@ interface MapsProviderProps {
 
 export function MapsProvider({ apiKey, children }: MapsProviderProps) {
   if (!apiKey) {
-    console.error("Google Maps API Key is missing. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY environment variable.");
+    console.warn("Google Maps API Key is missing. Please set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY environment variable."); // Changed from console.error
     // Render children within a fallback UI if the API key is missing
     return (
        <div className="flex flex-col min-h-screen">
