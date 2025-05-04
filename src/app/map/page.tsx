@@ -218,6 +218,7 @@ const MapPage: React.FC = () => {
                         shadowUrl: '/_next/static/media/marker-shadow.png',
                     });
 
+                    // Dynamically import compatibility script client-side ONLY after L is defined
                     await import('leaflet-defaulticon-compatibility');
                     setLeafletLoaded(true); // Mark Leaflet as fully loaded
                     console.log("Leaflet and compatibility loaded successfully.");
@@ -243,25 +244,43 @@ const MapPage: React.FC = () => {
         }
     };
 
-    loadLeaflet();
+    // Execute loading logic only once on mount
+    if (!leafletLoaded) {
+       loadLeaflet();
+    }
 
 
-    // Cleanup function: remove map instance ONLY IF IT EXISTS
+    // Cleanup function: Enhanced to prevent errors in Strict Mode
     return () => {
-        if (mapRef.current) {
-             console.log("Attempting to remove map instance during cleanup.");
-             try {
-                 mapRef.current.remove(); // Cleanly remove the map instance
-             } catch (e) {
-                 console.warn("Error removing map instance:", e);
-             } finally {
-                mapRef.current = null; // Nullify the ref AFTER removal attempt
-                console.log("Map instance reference set to null.");
-             }
-        }
+       console.log("MapPage cleanup triggered.");
+       const currentMap = mapRef.current;
+       if (currentMap) {
+           console.log("Attempting to remove map instance during cleanup.");
+           try {
+               // Check if the container associated with the map instance still exists
+               // This helps avoid errors if the DOM node was already removed by React
+               const container = currentMap.getContainer();
+               if (container && container.parentNode) {
+                   currentMap.remove(); // Cleanly remove the map instance
+                   console.log("Map instance removed successfully.");
+               } else {
+                   console.log("Map container not found or already removed from DOM. Skipping remove().");
+               }
+           } catch (e) {
+               console.warn("Error removing map instance:", e);
+           } finally {
+               // Only nullify the ref if it points to the instance we tried to remove
+               if (mapRef.current === currentMap) {
+                   mapRef.current = null;
+                   console.log("Map instance reference set to null.");
+               }
+           }
+       } else {
+            console.log("No map instance found in ref during cleanup.");
+       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount
+  }, [leafletLoaded, fetchCityTemperatures, fetchUserLocationAndSensor]); // Dependencies ensure leaflet loading logic runs correctly
 
 
   const temperatureDifference = useMemo(() => {
@@ -329,10 +348,23 @@ const MapPage: React.FC = () => {
             className="w-full h-full rounded-b-lg z-0"
             style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
              whenCreated={(mapInstance) => {
-                 // Use ref to store the map instance. Important for cleanup.
-                 mapRef.current = mapInstance;
-                 console.log("Map instance created and assigned to ref.");
+                 // Only assign to ref if it's currently null (to avoid issues in Strict Mode)
+                 if (!mapRef.current) {
+                     mapRef.current = mapInstance;
+                     console.log("Map instance created and assigned to ref.");
+                 } else {
+                      console.log("Map instance already exists in ref, skipping assignment.");
+                      // If an instance already exists, ensure the new one is cleaned up immediately
+                      // This might happen in StrictMode's double-render
+                      try {
+                          mapInstance.remove();
+                      } catch (e) {
+                          console.warn("Error removing duplicate map instance:", e);
+                      }
+                 }
              }}
+             // whenReady is often more reliable than whenCreated for setup
+            // whenReady={(mapInstance) => { /* Potentially move some logic here */ }}
           >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
              <TileLayer
@@ -478,3 +510,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
+    
