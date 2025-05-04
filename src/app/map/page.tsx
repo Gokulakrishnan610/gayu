@@ -17,6 +17,7 @@ const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLaye
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
 const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false });
 
+
 // --- City Data Interface ---
 interface CityTemperature {
   city: string;
@@ -32,7 +33,6 @@ const createCustomIcon = (
     size: number = 30,
     fontSize: number = 10
 ): DivIcon | null => {
-    // Ensure Leaflet (L) is available on the client-side
     if (typeof window === 'undefined' || !(window as any).L) return null;
 
     const L = (window as any).L;
@@ -52,7 +52,8 @@ const createCustomIcon = (
 
 
 // --- Inner Map Component ---
-// Memoize the inner component to prevent unnecessary re-renders
+// This component renders the actual MapContainer and its children.
+// It's memoized to prevent unnecessary re-renders.
 const MapInner = React.memo(({
     center,
     zoom,
@@ -68,7 +69,7 @@ const MapInner = React.memo(({
 } : {
     center: LatLngExpression;
     zoom: number;
-    whenCreated: (map: LeafletMap) => void;
+    whenCreated: (map: LeafletMap) => void; // Added whenCreated prop
     isLoading: boolean;
     location: LatLngExpression | null;
     userSensorIcon: DivIcon | null;
@@ -78,16 +79,32 @@ const MapInner = React.memo(({
     cityTemperatures: CityTemperature[];
     cityIcons: { [key: string]: DivIcon };
 }) => {
-    // No need to check for component existence here if parent handles loading state correctly
+
+    // This effect attempts to handle cleanup, though react-leaflet should manage this.
+    // It might help mitigate issues in StrictMode.
+    useEffect(() => {
+        let mapInstance: LeafletMap | null = null;
+        const setMapInstance = (map: LeafletMap) => {
+            mapInstance = map;
+            whenCreated(map); // Call the passed callback
+        };
+
+        return () => {
+            // Attempt to remove the map instance if it exists when the component unmounts
+            // mapInstance?.remove(); // Commented out: Let react-leaflet handle cleanup first. Direct removal can cause issues.
+        };
+    }, [whenCreated]);
 
     return (
+         // MapContainer should only be rendered once its container is ready
+         // and Leaflet is loaded. The parent component (MapPage) ensures this.
          <MapContainer
             center={center}
             zoom={zoom}
             scrollWheelZoom={true}
             style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0, zIndex: 0 }}
             className="rounded-b-lg"
-            whenCreated={whenCreated} // Pass the callback
+            whenCreated={whenCreated} // Pass the whenCreated callback here
         >
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -155,6 +172,7 @@ const MapPage: React.FC = () => {
     const [mapZoom, setMapZoom] = useState<number>(3); // Default zoom
     const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance
 
+
     // Static city data
     const cityTemperatures: CityTemperature[] = useMemo(() => [
         { city: 'New York', lat: 40.7128, lng: -74.0060, temperature: 15.5 },
@@ -174,29 +192,29 @@ const MapPage: React.FC = () => {
         Promise.all([
              import('leaflet/dist/leaflet.css'),
              import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css'),
-             import('leaflet-defaulticon-compatibility') // Import JS
-        ]).then(() => {
-            // Check if L is available after imports
-             if ((window as any).L) {
-                 // Fix default icon paths after dynamic import
-                 delete ((window as any).L.Icon.Default.prototype as any)._getIconUrl;
-                 (window as any).L.Icon.Default.mergeOptions({
-                    // Use relative paths based on where webpack copies the files
-                    iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-                    iconUrl: '/_next/static/media/marker-icon.png',
-                    shadowUrl: '/_next/static/media/marker-shadow.png',
-                 });
-                 setLeafletLoaded(true);
-                 console.log("Leaflet resources loaded and icons configured.");
-             } else {
-                 console.error("Leaflet (L) not found on window after imports.");
-                 setError("Map resources failed to load correctly.");
-             }
+             // Dynamically import the JS part ONLY on the client
+             import('leaflet-defaulticon-compatibility')
+        ]).then(([_, __, compatibility]) => { // Get the module default export
+            if ((window as any).L) {
+                // Fix default icon paths after dynamic import
+                delete ((window as any).L.Icon.Default.prototype as any)._getIconUrl;
+                (window as any).L.Icon.Default.mergeOptions({
+                   iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                   iconUrl: '/_next/static/media/marker-icon.png',
+                   shadowUrl: '/_next/static/media/marker-shadow.png',
+                });
+                setLeafletLoaded(true);
+                console.log("Leaflet resources loaded and icons configured.");
+            } else {
+                console.error("Leaflet (L) not found on window after imports.");
+                setError("Map resources failed to load correctly.");
+            }
         }).catch(err => {
              console.error("Failed to load Leaflet resources", err);
              setError("Map resources failed to load.");
         });
     }, []);
+
 
     // Load sensor IP from localStorage
     useEffect(() => {
@@ -206,9 +224,10 @@ const MapPage: React.FC = () => {
         }
     }, [isClient]);
 
+
     // Fetch user sensor data and location based on IP
     const fetchUserDataAndLocation = useCallback(async () => {
-         if (!isClient || !leafletLoaded) return; // Ensure client and leaflet are ready
+         if (!isClient || !leafletLoaded) return;
 
         setIsLoading(true);
         setError(null);
@@ -220,7 +239,6 @@ const MapPage: React.FC = () => {
         if (currentIp) {
             let locationCoords: LatLngExpression | null = null;
             try {
-                // Fetch location first
                  const locationRes = await fetch(`https://ipapi.co/${currentIp}/json/`);
                  if (locationRes.ok) {
                      const locationJson = await locationRes.json();
@@ -247,7 +265,6 @@ const MapPage: React.FC = () => {
              }
 
             try {
-                // Fetch sensor data
                 const dataRes = await fetch(`http://${currentIp}/data`);
                 if (!dataRes.ok) throw new Error(`Sensor data error (Status: ${dataRes.status})`);
                 const dataJson: SensorData = await dataRes.json();
@@ -256,7 +273,7 @@ const MapPage: React.FC = () => {
                     humidity: typeof dataJson.humidity === 'number' ? dataJson.humidity : null,
                 };
                 setUserSensorData(validatedData);
-                setError(null); // Clear sensor error
+                setError(null);
 
             } catch (err: any) {
                 console.error('Error fetching real sensor data:', err);
@@ -273,7 +290,6 @@ const MapPage: React.FC = () => {
                 setIsLoading(false);
             }
         } else {
-             // Use mock data if no IP
              try {
                  const mockData = await getMockSensorData();
                  setUserSensorData(mockData);
@@ -290,23 +306,39 @@ const MapPage: React.FC = () => {
                  setIsLoading(false);
              }
         }
-    }, [isClient, leafletLoaded, sensorIp, location]); // location dependency for map centering logic
+    }, [isClient, leafletLoaded, sensorIp, location]); // location added for map centering
 
     // Fetch data on initial load and when sensorIp changes
     useEffect(() => {
         if (isClient && leafletLoaded) {
             fetchUserDataAndLocation();
         }
-    }, [isClient, leafletLoaded, fetchUserDataAndLocation]); // Depend on fetchUserDataAndLocation itself
+    }, [isClient, leafletLoaded, fetchUserDataAndLocation]);
 
-    // Callback to store the map instance
-    const whenMapCreated = useCallback((mapInstance: LeafletMap) => {
-        mapRef.current = mapInstance;
-         // If we have a location and the map just got created, set the view
-         if(location && !isLoading){
-             mapInstance.setView(location, 10);
-         }
-    }, [location, isLoading]);
+
+     // Callback to store the map instance
+     const whenMapCreated = useCallback((mapInstance: LeafletMap) => {
+        // Prevent setting ref multiple times due to StrictMode or HMR
+        if (!mapRef.current) {
+             mapRef.current = mapInstance;
+             console.log("Map instance created and ref set.");
+             // If we have a location and the map just got created, set the view
+             if(location && !isLoading){
+                 mapInstance.setView(location, 10);
+             }
+        }
+     }, [location, isLoading]); // Add location and isLoading as dependencies
+
+    // Cleanup map instance on component unmount
+     useEffect(() => {
+         return () => {
+             if (mapRef.current) {
+                 console.log("Removing map instance.");
+                 mapRef.current.remove();
+                 mapRef.current = null;
+             }
+         };
+     }, []);
 
 
      // --- Memoized Values ---
@@ -337,30 +369,30 @@ const MapPage: React.FC = () => {
             <h1 className="text-3xl font-bold text-primary">Sensor Location Map</h1>
 
             {/* Error and Status Alerts */}
-            {error && (
-                <Alert variant="destructive" className="mb-4">
+             {error && (
+                 <Alert variant="destructive" className="mb-4">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>Sensor Error</AlertTitle>
                     <AlertDescription>{error}</AlertDescription>
-                </Alert>
-            )}
-             {locationError && !error && (
-                 <Alert variant="default" className="mb-4 border-orange-500 text-orange-800 dark:border-orange-400 dark:text-orange-300">
-                    <WifiOff className="h-4 w-4 text-orange-600 dark:text-orange-400"/>
-                    <AlertTitle>Location Issue</AlertTitle>
-                    <AlertDescription>{locationError}</AlertDescription>
                  </Alert>
              )}
-             {usingMockData && !error && !isLoading && (
-                <Alert variant="default" className="mb-4 border-blue-500 text-blue-800 dark:border-blue-400 dark:text-blue-300">
-                   <ServerCog className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                   <AlertTitle>Using Mock Data</AlertTitle>
-                   <AlertDescription>
-                     {sensorIp ? 'Could not connect. ' : 'No sensor IP. '}
-                     Displaying mock data. Configure in <a href="/settings" className="underline font-medium">Settings</a>. Location may be unavailable.
-                   </AlertDescription>
-                </Alert>
-             )}
+              {locationError && !error && (
+                  <Alert variant="default" className="mb-4 border-orange-500 text-orange-800 dark:border-orange-400 dark:text-orange-300">
+                     <WifiOff className="h-4 w-4 text-orange-600 dark:text-orange-400"/>
+                     <AlertTitle>Location Issue</AlertTitle>
+                     <AlertDescription>{locationError}</AlertDescription>
+                  </Alert>
+              )}
+              {usingMockData && !error && !isLoading && (
+                 <Alert variant="default" className="mb-4 border-blue-500 text-blue-800 dark:border-blue-400 dark:text-blue-300">
+                    <ServerCog className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <AlertTitle>Using Mock Data</AlertTitle>
+                    <AlertDescription>
+                      {sensorIp ? 'Could not connect. ' : 'No sensor IP. '}
+                      Displaying mock data. Configure in <a href="/settings" className="underline font-medium">Settings</a>. Location may be unavailable.
+                    </AlertDescription>
+                 </Alert>
+              )}
 
              {/* Map Card */}
             <Card>
@@ -370,26 +402,26 @@ const MapPage: React.FC = () => {
                         {location ? "Sensor location vs. major cities." : "Configure sensor IP for location."}
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="h-[500px] p-0 relative">
-                    {/* Render Skeleton initially or MapInner when ready */}
-                    {!isClient || !leafletLoaded ? (
-                        <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" />
-                    ) : (
-                        <MapInner
-                            center={mapCenter}
-                            zoom={mapZoom}
-                            whenCreated={whenMapCreated} // Pass the ref callback
-                            isLoading={isLoading}
-                            location={location}
-                            userSensorIcon={userSensorIcon}
-                            userSensorData={userSensorData}
-                            usingMockData={usingMockData}
-                            sensorIp={sensorIp}
-                            cityTemperatures={cityTemperatures}
-                            cityIcons={cityIcons}
-                        />
-                    )}
-                </CardContent>
+                 <CardContent className="h-[500px] p-0 relative">
+                     {/* Show Skeleton initially OR when Leaflet isn't loaded */}
+                     {!isClient || !leafletLoaded ? (
+                         <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" />
+                     ) : (
+                         <MapInner
+                             center={mapCenter}
+                             zoom={mapZoom}
+                             whenCreated={whenMapCreated} // Pass the callback
+                             isLoading={isLoading}
+                             location={location}
+                             userSensorIcon={userSensorIcon}
+                             userSensorData={userSensorData}
+                             usingMockData={usingMockData}
+                             sensorIp={sensorIp}
+                             cityTemperatures={cityTemperatures}
+                             cityIcons={cityIcons}
+                         />
+                     )}
+                 </CardContent>
             </Card>
 
              {/* Simple Sensor Data Display */}
@@ -439,3 +471,4 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+```
