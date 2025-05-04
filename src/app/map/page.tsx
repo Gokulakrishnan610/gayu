@@ -14,7 +14,7 @@ import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
 
 // Dynamically import react-leaflet components with ssr: false
-const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
+const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false, loading: () => <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg bg-muted/80 flex items-center justify-center"><p>Loading Map Components...</p></Skeleton> });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
 const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
@@ -24,6 +24,7 @@ const MapUpdater = dynamic(() => import('@/components/map-updater'), { ssr: fals
 declare global {
     interface Window {
       L: typeof import('leaflet') | undefined;
+      _leaflet_compatibility_loaded?: boolean; // Flag to track compatibility script load
     }
 }
 
@@ -85,7 +86,7 @@ const MapPage: React.FC = () => {
 
   const fetchCityTemperatures = useCallback(async () => {
     setLoadingCities(true);
-    setError(null); // Clear previous errors
+    // setError(null); // Don't clear general errors here, allow specific errors to append
     try {
       const temperaturePromises = CITIES.map(city => getCityTemperature(city.name));
       const results = await Promise.all(temperaturePromises);
@@ -105,10 +106,11 @@ const MapPage: React.FC = () => {
 
   const fetchSensorDataForLocation = useCallback(async (forceMock = false) => {
     setLoadingSensor(true);
+    let connectionError = null; // Track connection specific errors
     try {
       const storedIp = typeof window !== 'undefined' ? localStorage.getItem('sensorIp') : null;
       let sensorData: SensorData;
-      let connectionError = null;
+
 
       if (storedIp && !forceMock) {
         try {
@@ -123,7 +125,7 @@ const MapPage: React.FC = () => {
       } else {
          console.log(forceMock ? 'Forcing mock sensor data fetch.' : 'No sensor IP, using mock data.');
          sensorData = await getSensorData(); // Use mock if no IP or forced
-         if (!storedIp) {
+         if (!storedIp && !forceMock) { // Add !forceMock condition here
             connectionError = 'No sensor IP configured.';
          }
       }
@@ -133,14 +135,7 @@ const MapPage: React.FC = () => {
         humidity: typeof sensorData.humidity === 'number' ? sensorData.humidity : null,
       };
       setUserSensorData(validatedData);
-      if (connectionError) {
-         // Append connection error, avoiding duplicate messages
-         setError((prev) => {
-             const newError = connectionError || '';
-             if (!prev) return newError;
-             return prev.includes(newError) ? prev : `${prev} ${newError}`;
-         });
-      }
+
     } catch (sensorErr) {
       console.error('Error fetching sensor data:', sensorErr);
       setError((prev) => prev ? `${prev} Failed to fetch sensor data.` : 'Failed to fetch sensor data.');
@@ -148,17 +143,30 @@ const MapPage: React.FC = () => {
         console.log('Fetching mock sensor data due to general sensor error.');
         const mockSensorData = await getSensorData();
          setUserSensorData(mockSensorData);
+         // If sensor fetch failed, it's likely a connection issue, but we got mock data
+         if (!connectionError) connectionError = 'Sensor fetch failed.';
       } catch (mockErr){
            console.error('Failed fetching mock sensor data:', mockErr);
            setUserSensorData({ temperature: null, humidity: null }); // Set to null on final fallback
+           // If even mock fails, that's a different error
+           setError((prev) => prev ? `${prev} Failed to fetch mock sensor data.` : 'Failed to fetch mock sensor data.');
+           connectionError = null; // Reset connection error as it's a mock fetch failure
        }
     } finally {
+       if (connectionError) {
+          // Append connection error, avoiding duplicate messages
+          setError((prev) => {
+              if (!prev) return connectionError;
+              return prev.includes(connectionError) ? prev : `${prev} ${connectionError}`;
+          });
+       }
       setLoadingSensor(false);
     }
   }, []); // Removed error from dependencies to avoid loops
 
   const fetchLocationAndSensorFromAPI = useCallback(async () => {
     setLoadingLocation(true); // Start location loading
+    let locationError = null;
     try {
       const location = await getCurrentLocation();
       setUserLocation(location);
@@ -166,10 +174,13 @@ const MapPage: React.FC = () => {
       setMapZoom(10);
     } catch (locError) {
       console.error('Error fetching location from API:', locError);
-      setError((prev) => prev ? `${prev} Failed to retrieve location.` : 'Failed to retrieve location.');
+      locationError = 'Failed to retrieve location via API.';
       // Don't set userLocation, keep it null or previous value if any
     } finally {
       setLoadingLocation(false); // Finish location loading
+       if (locationError) {
+           setError((prev) => prev ? `${prev} ${locationError}` : locationError);
+       }
     }
 
     // Fetch sensor data regardless of location success/failure
@@ -179,7 +190,8 @@ const MapPage: React.FC = () => {
   const fetchUserLocationAndSensor = useCallback(async () => {
     setLoadingLocation(true);
     setLoadingSensor(true);
-    setError(null); // Clear previous errors
+    // Don't clear general error here, let specific fetchers manage it
+    // setError(null);
 
     try {
       if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
@@ -194,7 +206,12 @@ const MapPage: React.FC = () => {
           },
           async (geoError) => {
             console.warn('Geolocation error:', geoError.message, 'Falling back to API.');
-            // Error handled by fetchLocationAndSensorFromAPI
+             setError((prev) => {
+                 const geoErrMsg = 'Geolocation failed.';
+                 if (!prev) return geoErrMsg;
+                 return prev.includes(geoErrMsg) ? prev : `${prev} ${geoErrMsg}`;
+             });
+            // Error display handled by fetchLocationAndSensorFromAPI
             await fetchLocationAndSensorFromAPI();
             // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
           },
@@ -202,6 +219,11 @@ const MapPage: React.FC = () => {
         );
       } else {
         console.warn('Geolocation not supported, falling back to API.');
+         setError((prev) => {
+             const noGeoMsg = 'Geolocation not supported.';
+             if (!prev) return noGeoMsg;
+             return prev.includes(noGeoMsg) ? prev : `${prev} ${noGeoMsg}`;
+         });
         await fetchLocationAndSensorFromAPI();
         // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
       }
@@ -215,93 +237,115 @@ const MapPage: React.FC = () => {
     }
   }, [fetchSensorDataForLocation, fetchLocationAndSensorFromAPI]);
 
-   // First useEffect: Handle client-side detection
+   // Effect 1: Set isClient on mount
    useEffect(() => {
        setIsClient(true);
    }, []);
 
-
-   // Second useEffect: Load Leaflet library and icons when client-side
+   // Effect 2: Load Leaflet and compatibility script
    useEffect(() => {
        if (!isClient) return; // Only run on client
 
-       let leafletImported = false;
+       let isMounted = true; // Flag to track mount status
 
        const loadLeaflet = async () => {
-           if (typeof window !== 'undefined' && !window.L) {
-               try {
-                   const leaflet = await import('leaflet');
-                   window.L = leaflet;
+            if (typeof window === 'undefined') return; // Guard against server-side execution
 
-                   // Apply compatibility fixes for default icons *after* L is assigned
-                   delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-                   window.L.Icon.Default.mergeOptions({
-                       iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-                       iconUrl: '/_next/static/media/marker-icon.png',
-                       shadowUrl: '/_next/static/media/marker-shadow.png',
-                   });
+            // Check if Leaflet is already loaded
+            if (window.L && leafletLoaded) {
+                console.log("Leaflet already loaded and initialized.");
+                return;
+            }
 
-                   // Import compatibility script only after Leaflet and fixes are loaded
-                   await import('leaflet-defaulticon-compatibility');
-                   leafletImported = true;
-                   setLeafletLoaded(true); // Mark Leaflet as fully loaded
-                   console.log("Leaflet and compatibility script loaded successfully.");
+            try {
+                 if (!window.L) {
+                     console.log("Loading Leaflet library...");
+                     const leaflet = await import('leaflet');
+                     // Only assign if the component is still mounted
+                     if (isMounted && !window.L) {
+                          window.L = leaflet;
+                          console.log("Leaflet library loaded.");
+                     } else if (!isMounted) {
+                         console.log("Component unmounted before Leaflet could be assigned.");
+                         return; // Exit if unmounted
+                     }
+                 }
 
-               } catch (error) {
-                   console.error("Failed to load Leaflet or compatibility script:", error);
-                   setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
-                   setLoadingCities(false); // Stop loading indicators if Leaflet fails
-                   setLoadingLocation(false);
-                   setLoadingSensor(false);
-               }
-           } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
-               // Leaflet might exist from a previous render (Strict Mode) but wasn't marked as loaded
-               try {
-                   await import('leaflet-defaulticon-compatibility'); // Ensure compatibility is run
-                   leafletImported = true;
-                   setLeafletLoaded(true); // Mark as loaded
-                   console.log("Leaflet compatibility ensured on subsequent render.");
-               } catch (error) {
-                   console.error("Failed to ensure Leaflet compatibility script (retry):", error);
-                    setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
-               }
-           } else if (leafletLoaded) {
-                leafletImported = true; // Already loaded
-           }
+
+                 // Apply compatibility fixes only if L exists and script hasn't run yet
+                 if (window.L && !window._leaflet_compatibility_loaded) {
+                     console.log("Applying Leaflet default icon compatibility fixes...");
+                     delete (window.L.Icon.Default.prototype as any)._getIconUrl;
+                     window.L.Icon.Default.mergeOptions({
+                         iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                         iconUrl: '/_next/static/media/marker-icon.png',
+                         shadowUrl: '/_next/static/media/marker-shadow.png',
+                     });
+
+                     // Dynamically import the compatibility script
+                     await import('leaflet-defaulticon-compatibility');
+                     window._leaflet_compatibility_loaded = true; // Mark script as loaded
+                     console.log("Leaflet compatibility script executed.");
+                 }
+
+                 // Set leafletLoaded state only if component is still mounted
+                 if (isMounted) {
+                      setLeafletLoaded(true);
+                      console.log("Leaflet setup complete.");
+                 } else {
+                      console.log("Component unmounted during Leaflet setup.");
+                 }
+
+            } catch (error) {
+                 console.error("Failed to load Leaflet or compatibility script:", error);
+                 if (isMounted) { // Only set error if mounted
+                     setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
+                     setLoadingCities(false); // Stop loading indicators if Leaflet fails
+                     setLoadingLocation(false);
+                     setLoadingSensor(false);
+                 }
+            }
        };
 
-        loadLeaflet(); // Execute the load function
+       loadLeaflet();
 
-       // Cleanup function for map instance - runs ONLY when the component unmounts
+       // Cleanup function
        return () => {
-           if (mapRef.current) {
-               console.log("Attempting to remove map instance on component unmount.");
-               try {
-                   mapRef.current.off(); // Unbind all event listeners
-                   mapRef.current.remove(); // Clean up the Leaflet map instance
-                   mapRef.current = null; // Explicitly nullify the ref
-                   console.log("Map instance removed successfully on unmount.");
-               } catch (e) {
-                   console.warn("Error removing map during unmount cleanup:", e);
-               }
-           }
+           isMounted = false; // Mark as unmounted
+           console.log("MapPage cleanup: isMounted set to false.");
+           // Clean up the map instance if it exists
+            if (mapRef.current) {
+                console.log("Attempting to remove map instance on unmount.");
+                try {
+                    mapRef.current.off(); // Unbind all event listeners
+                    mapRef.current.remove(); // Clean up the Leaflet map instance
+                    mapRef.current = null; // Explicitly nullify the ref
+                    console.log("Map instance removed successfully on unmount.");
+                } catch (e) {
+                    console.warn("Error removing map during unmount cleanup:", e);
+                }
+            }
+            // Reset Leaflet loaded state on unmount might help in some scenarios,
+            // but can cause issues if other components rely on L being available.
+            // setLeafletLoaded(false);
        };
-    // Dependency only on isClient ensures this runs once when client becomes true
+   // Dependency only on isClient ensures this runs once when client becomes true
    }, [isClient]);
 
 
-   // Third useEffect: Fetch data *only* after Leaflet is loaded
+   // Effect 3: Fetch data *only* after Leaflet is loaded
    useEffect(() => {
+       // Ensure it runs only once after isClient and leafletLoaded become true
        if (isClient && leafletLoaded) {
            console.log("Leaflet loaded, fetching initial map data.");
            fetchCityTemperatures();
            fetchUserLocationAndSensor();
        }
        // Intentionally NOT depending on fetch functions to run only once after load
-   }, [isClient, leafletLoaded]); // Trigger data fetch when leaflet is ready
+   }, [isClient, leafletLoaded, fetchCityTemperatures, fetchUserLocationAndSensor]); // Add fetch functions to dependencies
 
 
-   // Fourth useEffect: Update icons when data or Leaflet state changes
+   // Effect 4: Update icons when data or Leaflet state changes
    useEffect(() => {
        // Only create icons on the client when Leaflet is fully loaded
        if (isClient && leafletLoaded && window.L) {
@@ -382,15 +426,14 @@ const MapPage: React.FC = () => {
              className="w-full h-full rounded-b-lg z-0"
              style={{ backgroundColor: 'hsl(var(--muted))' }}
              whenCreated={mapInstance => {
-                 // Store the map instance in the ref.
-                 // Avoid re-initializing if the ref already holds a map instance.
+                 // Store the map instance in the ref only if it doesn't exist.
                  // This helps mitigate the "Map container is already initialized" error, especially in Strict Mode.
                  if (!mapRef.current) {
                     mapRef.current = mapInstance;
                     console.log("Map instance assigned via whenCreated.");
                  } else {
-                    console.log("Map instance already exists in ref, skipping assignment.");
-                    // Optionally update view if needed, though MapUpdater should handle it
+                    console.log("Map instance already exists in ref, skipping assignment in whenCreated.");
+                    // If the map already exists, maybe just update its view?
                     // mapRef.current.setView(mapCenter, mapZoom);
                  }
              }}
@@ -417,7 +460,7 @@ const MapPage: React.FC = () => {
                          </Popup>
                      </Marker>
                  ) : ( // Fallback default marker if custom icon fails for a city
-                      <Marker key={city.city} position={[city.lat, city.lng]}>
+                      <Marker key={city.city + "-fallback"} position={[city.lat, city.lng]}>
                            <Popup>
                                 <div className="p-1">
                                 <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
@@ -541,3 +584,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
+    
