@@ -33,6 +33,7 @@ const createCustomIcon = (
     size: number = 30,
     fontSize: number = 10
 ): DivIcon | null => {
+    // Check if L is available on window before using it
     if (typeof window === 'undefined' || !(window as any).L) return null;
 
     const L = (window as any).L;
@@ -53,11 +54,11 @@ const createCustomIcon = (
 
 // --- Inner Map Component ---
 // This component renders the actual MapContainer and its children.
-// It's memoized to prevent unnecessary re-renders.
+// It receives the map instance via the `whenCreated` prop.
 const MapInner = React.memo(({
     center,
     zoom,
-    whenCreated,
+    whenCreated, // Callback to receive the map instance
     isLoading,
     location,
     userSensorIcon,
@@ -69,7 +70,7 @@ const MapInner = React.memo(({
 } : {
     center: LatLngExpression;
     zoom: number;
-    whenCreated: (map: LeafletMap) => void; // Added whenCreated prop
+    whenCreated: (map: LeafletMap) => void; // Prop to pass map instance up
     isLoading: boolean;
     location: LatLngExpression | null;
     userSensorIcon: DivIcon | null;
@@ -80,31 +81,17 @@ const MapInner = React.memo(({
     cityIcons: { [key: string]: DivIcon };
 }) => {
 
-    // This effect attempts to handle cleanup, though react-leaflet should manage this.
-    // It might help mitigate issues in StrictMode.
-    useEffect(() => {
-        let mapInstance: LeafletMap | null = null;
-        const setMapInstance = (map: LeafletMap) => {
-            mapInstance = map;
-            whenCreated(map); // Call the passed callback
-        };
-
-        return () => {
-            // Attempt to remove the map instance if it exists when the component unmounts
-            // mapInstance?.remove(); // Commented out: Let react-leaflet handle cleanup first. Direct removal can cause issues.
-        };
-    }, [whenCreated]);
+    // Removed the local mapRef and useEffect that tried to manage cleanup.
+    // Relying solely on the `whenCreated` prop provided by react-leaflet MapContainer.
 
     return (
-         // MapContainer should only be rendered once its container is ready
-         // and Leaflet is loaded. The parent component (MapPage) ensures this.
          <MapContainer
             center={center}
             zoom={zoom}
             scrollWheelZoom={true}
             style={{ height: '100%', width: '100%', position: 'absolute', top: 0, left: 0, zIndex: 0 }}
             className="rounded-b-lg"
-            whenCreated={whenCreated} // Pass the whenCreated callback here
+            whenCreated={whenCreated} // Pass the callback directly to MapContainer
         >
             <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -194,26 +181,37 @@ const MapPage: React.FC = () => {
              import('leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css'),
              // Dynamically import the JS part ONLY on the client
              import('leaflet-defaulticon-compatibility')
-        ]).then(([_, __, compatibility]) => { // Get the module default export
-            if ((window as any).L) {
+        ]).then(() => {
+             // Check if L is available AFTER imports complete
+             if ((window as any).L) {
                 // Fix default icon paths after dynamic import
                 delete ((window as any).L.Icon.Default.prototype as any)._getIconUrl;
                 (window as any).L.Icon.Default.mergeOptions({
+                   // Use relative paths assuming webpack copies them correctly
                    iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
                    iconUrl: '/_next/static/media/marker-icon.png',
                    shadowUrl: '/_next/static/media/marker-shadow.png',
                 });
                 setLeafletLoaded(true);
                 console.log("Leaflet resources loaded and icons configured.");
-            } else {
-                console.error("Leaflet (L) not found on window after imports.");
-                setError("Map resources failed to load correctly.");
-            }
+             } else {
+                 console.error("Leaflet (L) not found on window after imports.");
+                 setError("Map resources failed to load correctly.");
+             }
         }).catch(err => {
              console.error("Failed to load Leaflet resources", err);
              setError("Map resources failed to load.");
         });
-    }, []);
+
+         // Cleanup function for the map instance
+         return () => {
+            if (mapRef.current) {
+                console.log("MapPage unmounting: Removing map instance.");
+                mapRef.current.remove();
+                mapRef.current = null;
+            }
+        };
+    }, []); // Empty dependency array ensures this runs only once on mount
 
 
     // Load sensor IP from localStorage
@@ -245,12 +243,13 @@ const MapPage: React.FC = () => {
                      if (locationJson.latitude && locationJson.longitude) {
                         locationCoords = [locationJson.latitude, locationJson.longitude];
                          setLocation(locationCoords);
-                         // Center map only if location is significantly different or first time
-                         if (mapRef.current && (!location || Math.abs(location[0] - locationCoords[0]) > 0.01 || Math.abs(location[1] - locationCoords[1]) > 0.01)) {
-                             mapRef.current.setView(locationCoords, 10);
-                         } else if (!mapRef.current && !location) {
-                            setMapCenter(locationCoords);
-                            setMapZoom(10);
+                         // Center map only if map exists and location is new/different
+                         if (mapRef.current) {
+                             mapRef.current.setView(locationCoords, 10); // Use stored map instance
+                         } else {
+                             // If map doesn't exist yet, update initial center/zoom
+                             setMapCenter(locationCoords);
+                             setMapZoom(10);
                          }
                          setLocationError(null);
                      } else {
@@ -281,7 +280,7 @@ const MapPage: React.FC = () => {
                  try {
                     const mockData = await getMockSensorData();
                     setUserSensorData(mockData);
-                } catch (mockErr) {
+                } catch (mockErr: any) { // Added type annotation
                      console.error('Failed fetching mock sensor data:', mockErr);
                      setUserSensorData({ temperature: null, humidity: null });
                 }
@@ -293,11 +292,11 @@ const MapPage: React.FC = () => {
              try {
                  const mockData = await getMockSensorData();
                  setUserSensorData(mockData);
-                 setLocation(null);
+                 setLocation(null); // No location if no IP
                  setUsingMockData(true);
                  setError(null);
                  setLocationError('No sensor IP configured.');
-             } catch (mockErr) {
+             } catch (mockErr: any) { // Added type annotation
                  console.error('Error fetching mock sensor data:', mockErr);
                  setError('Failed to fetch mock sensor data.');
                  setLocationError('Failed to fetch location (no IP).');
@@ -306,7 +305,7 @@ const MapPage: React.FC = () => {
                  setIsLoading(false);
              }
         }
-    }, [isClient, leafletLoaded, sensorIp, location]); // location added for map centering
+    }, [isClient, leafletLoaded, sensorIp]); // Removed location dependency to avoid loop
 
     // Fetch data on initial load and when sensorIp changes
     useEffect(() => {
@@ -316,9 +315,9 @@ const MapPage: React.FC = () => {
     }, [isClient, leafletLoaded, fetchUserDataAndLocation]);
 
 
-     // Callback to store the map instance
+     // Callback to store the map instance from MapContainer's `whenCreated`
      const whenMapCreated = useCallback((mapInstance: LeafletMap) => {
-        // Prevent setting ref multiple times due to StrictMode or HMR
+        // Prevent setting ref multiple times if component re-renders unexpectedly
         if (!mapRef.current) {
              mapRef.current = mapInstance;
              console.log("Map instance created and ref set.");
@@ -326,31 +325,35 @@ const MapPage: React.FC = () => {
              if(location && !isLoading){
                  mapInstance.setView(location, 10);
              }
+        } else {
+            // If ref already exists, ensure it points to the latest instance
+            // This might happen with HMR or StrictMode causing double renders
+            if (mapRef.current !== mapInstance) {
+                 console.warn("Map instance recreated. Updating ref.");
+                 // Optionally remove the old one if it wasn't cleaned up properly
+                 // mapRef.current.remove();
+                 mapRef.current = mapInstance;
+                 // Re-apply view if needed
+                 if(location && !isLoading) {
+                      mapInstance.setView(location, 10);
+                 }
+            }
         }
      }, [location, isLoading]); // Add location and isLoading as dependencies
-
-    // Cleanup map instance on component unmount
-     useEffect(() => {
-         return () => {
-             if (mapRef.current) {
-                 console.log("Removing map instance.");
-                 mapRef.current.remove();
-                 mapRef.current = null;
-             }
-         };
-     }, []);
 
 
      // --- Memoized Values ---
 
     // Memoize the user sensor icon
     const userSensorIcon = useMemo(() => {
+        // Depend on leafletLoaded state before creating icon
         if (!leafletLoaded || !userSensorData) return null;
         return createCustomIcon(userSensorData.temperature, 'primary', 35, 12);
     }, [leafletLoaded, userSensorData]);
 
     // Memoize city icons
     const cityIcons = useMemo(() => {
+         // Depend on leafletLoaded state before creating icons
         if (!leafletLoaded) return {};
         return cityTemperatures.reduce((acc, city) => {
             const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
@@ -405,12 +408,12 @@ const MapPage: React.FC = () => {
                  <CardContent className="h-[500px] p-0 relative">
                      {/* Show Skeleton initially OR when Leaflet isn't loaded */}
                      {!isClient || !leafletLoaded ? (
-                         <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" />
+                         <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10" />
                      ) : (
                          <MapInner
                              center={mapCenter}
                              zoom={mapZoom}
-                             whenCreated={whenMapCreated} // Pass the callback
+                             whenCreated={whenMapCreated} // Pass the callback to get the map instance
                              isLoading={isLoading}
                              location={location}
                              userSensorIcon={userSensorIcon}
@@ -471,4 +474,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-```
