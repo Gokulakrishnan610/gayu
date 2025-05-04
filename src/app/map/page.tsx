@@ -77,8 +77,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3);
   const [isClient, setIsClient] = useState(false);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
-  const mapRef = useRef<LeafletMap | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null); // Ref for the container div
+  const mapRef = useRef<LeafletMap | null>(null); // Ref to hold the Leaflet map instance
 
   // City and user icon states - need to be created client-side only
   const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
@@ -313,12 +312,13 @@ const MapPage: React.FC = () => {
 
   // Clean up map instance on component unmount
   useEffect(() => {
+    // This function will run when the component unmounts
     return () => {
       if (mapRef.current) {
         console.log("Component unmounting, cleaning up map instance.");
         try {
-           mapRef.current.remove();
-           mapRef.current = null;
+           mapRef.current.remove(); // Properly remove the Leaflet map instance
+           mapRef.current = null; // Clear the ref
         } catch(e){
             console.warn("Error removing map on unmount:", e);
         }
@@ -452,13 +452,7 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
              {/* Conditionally render MapContainer only when fully ready */}
              {isClient && leafletLoaded && MapContainer ? (
-               <div
-                 className="w-full h-full"
-                 // Use a stable ID for the container
-                 id="leaflet-map-container"
-                 ref={mapContainerRef} // Attach ref to the container div
-               >
-                 {/* MapContainer is rendered inside the div */}
+                 // MapContainer is rendered inside the div
                  <MapContainer
                    center={mapCenter}
                    zoom={mapZoom}
@@ -470,7 +464,7 @@ const MapPage: React.FC = () => {
                  >
                    {renderMapContent()}
                  </MapContainer>
-               </div>
+
              ) : (
                // Show skeleton if not client-side or leaflet not loaded
                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg">
