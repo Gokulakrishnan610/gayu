@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { LatLngExpression, Icon as LeafletIconType } from 'leaflet'; // Rename Icon to avoid conflict
-// Removed: import 'leaflet-defaulticon-compatibility'; // Import the JS part
+// Removed: import 'leaflet-defaulticon-compatibility'; // Import the JS part - moved to dynamic import
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -72,7 +72,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  const [mapInstanceKey, setMapInstanceKey] = useState(0); // Key to force MapContainer re-render
+  // Removed: const [mapInstanceKey, setMapInstanceKey] = useState(0); // Key to force MapContainer re-render
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -140,7 +140,7 @@ const MapPage: React.FC = () => {
                try {
                  const mockSensorData = await getSensorData(); // Fallback to mock on error
                   setUserSensorData(mockSensorData);
-               } catch (mockErr) { // Add curly braces here
+               } catch (mockErr) {
                   console.error('Failed fetching mock sensor data:', mockErr);
                   setUserSensorData({ temperature: null, humidity: null });
                }
@@ -233,16 +233,12 @@ const MapPage: React.FC = () => {
     // Dynamically import Leaflet and compatibility script only on the client-side
     Promise.all([
       import('leaflet'),
-      import('leaflet-defaulticon-compatibility')
+      import('leaflet-defaulticon-compatibility') // Import JS part dynamically
     ]).then(([leaflet, _]) => {
       L = leaflet;
-      // Fix default icon path issue in Leaflet with bundlers (optional, handled by compatibility lib)
+      // No need to manually configure icon paths if compatibility lib is used
       // delete (L.Icon.Default.prototype as any)._getIconUrl;
-      // L.Icon.Default.mergeOptions({
-      //   iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png').default,
-      //   iconUrl: require('leaflet/dist/images/marker-icon.png').default,
-      //   shadowUrl: require('leaflet/dist/images/marker-shadow.png').default,
-      // });
+      // L.Icon.Default.mergeOptions({ ... });
       setLeafletLoaded(true); // Mark Leaflet as loaded
       // Data fetching can now happen as Leaflet is available
       fetchCityTemperatures();
@@ -255,13 +251,13 @@ const MapPage: React.FC = () => {
          setLoadingSensor(false);
     });
 
-    // Force re-render map on window resize or initial load - helps with tile issues
-     const handleResize = () => setMapInstanceKey(prevKey => prevKey + 1);
-     window.addEventListener('resize', handleResize);
-     handleResize(); // Initial key set
+    // Removed resize handler for mapInstanceKey
+    // const handleResize = () => setMapInstanceKey(prevKey => prevKey + 1);
+    // window.addEventListener('resize', handleResize);
+    // handleResize(); // Initial key set
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    return () => window.removeEventListener('resize', handleResize); // Cleanup listener
+    // return () => window.removeEventListener('resize', handleResize); // Cleanup listener
   }, []); // Empty dependency array ensures this runs once on mount
 
 
@@ -345,12 +341,16 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
               {/* MapContainer is always rendered, Skeleton overlays it when loading */}
               <MapContainer
-                key={mapInstanceKey} // Use key to force re-render and avoid initialization error
+                // Removed key={mapInstanceKey}
                 center={mapCenter}
                 zoom={mapZoom}
                 scrollWheelZoom={true}
                 className="w-full h-full rounded-b-lg z-0"
                 style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
+                whenCreated={(mapInstance) => {
+                    // Optional: Invalidate size if tiles don't load correctly initially
+                    setTimeout(() => mapInstance.invalidateSize(), 100);
+                }}
               >
                  {isLoading ? ( // Render Skeleton overlay if loading
                   <div className="absolute inset-0 bg-muted/80 flex items-center justify-center z-10">
@@ -473,6 +473,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
 
     
