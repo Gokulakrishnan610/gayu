@@ -340,7 +340,10 @@ const MapPage: React.FC = () => {
 
   // Function to render the map content (markers, popups, etc.)
   const renderMapContent = () => {
-     if (!MapContainer) return null; // Guard against MapContainer not being loaded yet
+     // Ensure MapContainer and its child components are defined before using them
+     if (!MapContainer || !TileLayer || !Marker || !Popup || !MapUpdater) {
+       return null;
+     }
 
      return (
        <>
