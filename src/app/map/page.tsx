@@ -19,7 +19,7 @@ const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), 
 const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
 const MapUpdater = dynamic(() => import('@/components/map-updater'), { ssr: false });
 
-// Declare global L variable
+// Declare global L variable - necessary for custom icon creation method
 declare global {
     interface Window {
       L: typeof import('leaflet') | undefined;
@@ -41,7 +41,7 @@ const CITIES = [
   { name: 'Cairo', lat: 30.0444, lng: 31.2357 },
 ];
 
-// Move custom icon creation to client-side only execution
+// Client-side icon creation function
 const createCustomIcon = (
   temperature: number,
   color: 'primary' | 'accent',
@@ -49,11 +49,10 @@ const createCustomIcon = (
   fontSize: number = 11,
   textColor: 'primary-foreground' | 'accent-foreground' = 'accent-foreground'
 ): LeafletIconType | null => {
-  // Only run if Leaflet is available
+  // Ensure Leaflet (L) is available on the window object
   if (typeof window === 'undefined' || !window.L) return null;
 
-  const L = window.L; // Access Leaflet from window
-
+  const L = window.L;
   const bgColorClass = color === 'primary' ? 'bg-primary' : 'bg-accent';
   const textColorClass = color === 'primary' ? 'text-primary-foreground' : 'text-accent-foreground';
 
@@ -64,6 +63,7 @@ const createCustomIcon = (
     iconAnchor: [size / 2, size / 2],
   });
 };
+
 
 const MapPage: React.FC = () => {
   const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
@@ -82,6 +82,7 @@ const MapPage: React.FC = () => {
   // City and user icon states - need to be created client-side only
   const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
   const [userIconState, setUserIconState] = useState<LeafletIconType | null>(null);
+
 
   const fetchCityTemperatures = useCallback(async () => {
     setLoadingCities(true);
@@ -103,7 +104,8 @@ const MapPage: React.FC = () => {
     }
   }, []);
 
-  const fetchSensorDataForLocation = useCallback(async (forceMock = false) => {
+
+   const fetchSensorDataForLocation = useCallback(async (forceMock = false) => {
     setLoadingSensor(true);
     try {
       const storedIp = typeof window !== 'undefined' ? localStorage.getItem('sensorIp') : null;
@@ -157,7 +159,8 @@ const MapPage: React.FC = () => {
     }
   }, []);
 
-  const fetchLocationAndSensorFromAPI = useCallback(async () => {
+
+   const fetchLocationAndSensorFromAPI = useCallback(async () => {
     setLoadingLocation(true); // Start location loading
     try {
       const location = await getCurrentLocation();
@@ -215,12 +218,12 @@ const MapPage: React.FC = () => {
     }
   }, [fetchSensorDataForLocation, fetchLocationAndSensorFromAPI]);
 
-  // First useEffect: Handle client-side detection
+  // Effect 1: Set isClient to true on component mount
   useEffect(() => {
     setIsClient(true);
   }, []);
 
-  // Second useEffect: Load Leaflet library and icons when client-side
+  // Effect 2: Load Leaflet library and compatibility scripts client-side
   useEffect(() => {
     if (!isClient) return; // Only run on client
 
@@ -233,9 +236,9 @@ const MapPage: React.FC = () => {
           // Apply compatibility fixes for default icons *after* L is assigned
           delete (L.Icon.Default.prototype as any)._getIconUrl;
           L.Icon.Default.mergeOptions({
-            iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-            iconUrl: '/_next/static/media/marker-icon.png',
-            shadowUrl: '/_next/static/media/marker-shadow.png',
+            iconRetinaUrl: '/_next/static/media/marker-icon-2x.png', // Path adjusted for webpack copy plugin output
+            iconUrl: '/_next/static/media/marker-icon.png',        // Path adjusted
+            shadowUrl: '/_next/static/media/marker-shadow.png',      // Path adjusted
           });
 
           // Dynamically import compatibility script only after Leaflet and fixes are loaded
@@ -269,7 +272,7 @@ const MapPage: React.FC = () => {
 
   }, [isClient, leafletLoaded]); // Dependency ensures this logic runs when client becomes true or leafletLoaded changes
 
-  // Third useEffect: Fetch data *only* after Leaflet is loaded
+  // Effect 3: Fetch data *only* after Leaflet is loaded client-side
   useEffect(() => {
     if (isClient && leafletLoaded) {
       console.log("Leaflet loaded, fetching initial map data.");
@@ -279,7 +282,7 @@ const MapPage: React.FC = () => {
     // Intentionally NOT depending on fetch functions to run only once after load
   }, [isClient, leafletLoaded]); // Trigger data fetch when leaflet is ready
 
-  // Fourth useEffect: Update icons when data or Leaflet state changes
+  // Effect 4: Update icons when data or Leaflet state changes (client-side only)
   useEffect(() => {
     // Only create icons on the client when Leaflet is fully loaded
     if (isClient && leafletLoaded) {
@@ -303,29 +306,28 @@ const MapPage: React.FC = () => {
     }
   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
 
-
-  // Handle map creation callback and store the map instance
-  const handleMapCreated = useCallback((map: LeafletMap) => {
-      mapRef.current = map;
-      console.log("Map instance created and stored in ref.");
+  // Use a map instance reference
+  const mapRefCb = useCallback((node: LeafletMap | null) => {
+    if (node !== null) {
+      mapRef.current = node;
+      console.log("Map instance created/updated and stored in ref.");
+    }
   }, []);
 
-  // Clean up map instance on component unmount
+  // Cleanup map instance on component unmount
   useEffect(() => {
-    // This function will run when the component unmounts
     return () => {
       if (mapRef.current) {
         console.log("Component unmounting, cleaning up map instance.");
         try {
-           mapRef.current.remove(); // Properly remove the Leaflet map instance
-           mapRef.current = null; // Clear the ref
-        } catch(e){
-            console.warn("Error removing map on unmount:", e);
+          mapRef.current.remove(); // Properly remove the Leaflet map instance
+          mapRef.current = null; // Clear the ref
+        } catch (e) {
+          console.warn("Error removing map on unmount:", e);
         }
       }
     };
   }, []); // Empty dependency array ensures this runs only on unmount
-
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
@@ -358,76 +360,68 @@ const MapPage: React.FC = () => {
 
   const isLoading = loadingCities || loadingLocation || loadingSensor;
 
-  // Function to render the map content (markers, popups, etc.)
+  // Render map content (markers, popups, etc.)
   const renderMapContent = () => {
-     // Ensure required components are loaded before using them
-     if (!isClient || !leafletLoaded || !MapContainer || !TileLayer || !Marker || !Popup || !MapUpdater) {
-       return null;
-     }
+    // Components are dynamically imported, check if they are loaded.
+    if (!MapUpdater || !TileLayer || !Marker || !Popup) {
+      return null; // Or a loading indicator specific to content
+    }
 
-     return (
-       <>
-         <MapUpdater center={mapCenter} zoom={mapZoom} />
-         <TileLayer
-           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-         />
+    return (
+      <>
+        <MapUpdater center={mapCenter} zoom={mapZoom} />
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        />
 
-         {/* City Markers */}
-         {cityTemperatures.map((city) => {
-           const icon = cityIconsState[city.city];
-           return icon ? (
-             <Marker
-               key={city.city}
-               position={[city.lat, city.lng]}
-               icon={icon}
-             >
+        {/* City Markers */}
+        {cityTemperatures.map((city) => {
+          const icon = cityIconsState[city.city];
+          return icon ? (
+            <Marker key={city.city} position={[city.lat, city.lng]} icon={icon}>
+              <Popup>
+                <div className="p-1">
+                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                </div>
+              </Popup>
+            </Marker>
+          ) : (
+            // Fallback default marker if custom icon failed
+            <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
                <Popup>
-                 <div className="p-1">
-                   <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                   <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
-                 </div>
-               </Popup>
-             </Marker>
-           ) : (
-             // Fallback default marker if custom icon failed
-             <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
-                <Popup>
-                 <div className="p-1">
-                   <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                   <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                 </div>
-               </Popup>
-             </Marker>
-           );
-         })}
+                <div className="p-1">
+                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
 
-         {/* User Location Marker */}
-         {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
-           <Marker
-             key="user-location-marker"
-             position={[userLocation.lat, userLocation.lng]}
-             icon={userIconState}
-           >
-             <Popup>
-               <div className="p-1">
-                 <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                 <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
-               </div>
-             </Popup>
-           </Marker>
-         ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
-           <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
-             <Popup>
-               <div className="p-1">
-                 <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                 <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-               </div>
-             </Popup>
-           </Marker>
-         ) : null}
-       </>
-     );
+        {/* User Location Marker */}
+        {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
+          <Marker key="user-location-marker" position={[userLocation.lat, userLocation.lng]} icon={userIconState}>
+            <Popup>
+              <div className="p-1">
+                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+              </div>
+            </Popup>
+          </Marker>
+        ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
+          <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
+            <Popup>
+              <div className="p-1">
+                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+              </div>
+            </Popup>
+          </Marker>
+        ) : null}
+      </>
+    );
   };
 
   // Main render structure
@@ -450,21 +444,21 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-             {/* Conditionally render MapContainer only when fully ready */}
+             {/* Conditionally render MapContainer only when on client and leaflet is loaded */}
              {isClient && leafletLoaded && MapContainer ? (
                  // MapContainer is rendered inside the div
                  <MapContainer
+                   ref={mapRefCb} // Use the callback ref
                    center={mapCenter}
                    zoom={mapZoom}
                    scrollWheelZoom={true}
                    className="w-full h-full z-0"
                    style={{ backgroundColor: 'hsl(var(--muted))' }}
-                   whenCreated={handleMapCreated} // Use whenCreated callback
-                   // Removed key prop as we are managing the instance with ref and cleanup
+                   // whenCreated is deprecated in react-leaflet v4, use ref callback instead
+                   // removed key prop
                  >
                    {renderMapContent()}
                  </MapContainer>
-
              ) : (
                // Show skeleton if not client-side or leaflet not loaded
                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg">
