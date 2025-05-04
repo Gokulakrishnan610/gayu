@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -71,7 +72,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  // Removed mapInstanceKey state as it can cause issues with strict mode / HMR
+  // Removed mapInstanceKey state
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -331,11 +332,8 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-              {isLoading ? ( // Show Skeleton if loading
-                <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10 bg-muted/80 flex items-center justify-center">
-                   <p>Loading Map...</p>
-                </Skeleton>
-              ) : ( // Render MapContainer only when not loading
+              {/* Render MapContainer only when on client and leaflet is loaded */}
+              {isClient && leafletLoaded ? (
                   <MapContainer
                     center={mapCenter}
                     zoom={mapZoom}
@@ -406,6 +404,10 @@ const MapPage: React.FC = () => {
                            </Marker>
                        )}
                   </MapContainer>
+                ) : ( // Show Skeleton if not client or Leaflet not loaded
+                   <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10 bg-muted/80 flex items-center justify-center">
+                      <p>Loading Map...</p>
+                   </Skeleton>
                 )}
           </CardContent>
         </Card>
@@ -461,3 +463,4 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+    
