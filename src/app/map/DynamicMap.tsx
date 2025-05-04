@@ -46,77 +46,125 @@
 
 
 
+
+// 'use client';
+
+// import React, { useEffect, useRef } from 'react';
+// import mapboxgl from 'mapbox-gl';
+
+// type Props = {
+//   location: [number, number];
+//   temperature: number | null;
+//   humidity?: number | null;
+// };
+
+// mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN!;
+
+// const DynamicMap: React.FC<Props> = ({ location, temperature, humidity }) => {
+//   const mapContainerRef = useRef<HTMLDivElement>(null);
+//   const mapRef = useRef<mapboxgl.Map | null>(null);
+
+//   useEffect(() => {
+//     if (!mapContainerRef.current || !location) return;
+
+//     if (mapRef.current) {
+//       mapRef.current.setCenter(location);
+//       return;
+//     }
+
+//     mapRef.current = new mapboxgl.Map({
+//       container: mapContainerRef.current,
+//       style: 'mapbox://styles/mapbox/streets-v11',
+//       center: location,
+//       zoom: 16,
+//     });
+
+//     const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+//       <div>
+//         <strong>Temperature:</strong> ${temperature ?? 'N/A'}°C<br/>
+//         <strong>Humidity:</strong> ${humidity ?? 'N/A'}%
+//       </div>
+//     `);
+
+//     new mapboxgl.Marker()
+//       .setLngLat(location)
+//       .setPopup(popup)
+//       .addTo(mapRef.current);
+
+//     return () => {
+//       mapRef.current?.remove();
+//     };
+//   }, [location, temperature, humidity]);
+
+//   return <div ref={mapContainerRef} className="h-[500px] w-full rounded-lg" />;
+// };
+
+// export default DynamicMap;
+
+
+
 'use client';
 
-import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import type { LatLngExpression, DivIcon } from 'leaflet';
-import { Thermometer, Droplets } from 'lucide-react'; // Import icons for popup
+import 'mapbox-gl/dist/mapbox-gl.css';
+import mapboxgl from 'mapbox-gl';
+import { useEffect, useRef, useState } from 'react';
+import { SensorData } from '@/services/sensor';
 
-// Note: The 'icon' prop is removed as custom icon creation is handled in page.tsx
-type Props = {
-  location: LatLngExpression;
-  temperature: number | null;
-  // Add humidity if available and needed in popup
-  humidity?: number | null;
-  icon: DivIcon | null; // Keep icon prop for the Marker
-};
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN!;
 
-const MAPBOX_ACCESS_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN; // Ensure this is set in .env.local or similar
+interface DynamicMapProps {
+  sensorData: SensorData;
+  lat: number;
+  lng: number;
+  usingMock: boolean;
+}
 
-const DynamicMap: React.FC<Props> = ({ location, temperature, humidity, icon }) => {
-  // Create a unique key based on location to help React re-render if location changes drastically
-  const mapKey = Array.isArray(location) ? location.join(',') : String(location);
+export default function DynamicMap({ sensorData, lat, lng, usingMock }: DynamicMapProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const [mounted, setMounted] = useState(false);
 
-  return (
-    <MapContainer
-      key={mapKey} // Use key for potential re-initialization if needed
-      center={location}
-      zoom={13}
-      scrollWheelZoom={true}
-      className="h-full w-full rounded-b-lg z-0" // Ensure map is behind skeleton initially
-      style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background during load
-    >
-      {/* Use Mapbox Streets for a potentially cleaner look, requires token */}
-      {MAPBOX_ACCESS_TOKEN ? (
-         <TileLayer
-           url={`https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_ACCESS_TOKEN}`}
-           attribution='© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-         />
-      ) : (
-         // Fallback to OpenStreetMap if Mapbox token is not available
-          <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
-      )}
+  useEffect(() => {
+    // Wait until DOM is mounted and container ref is ready
+    setMounted(true);
+  }, []);
 
-      {/* Display Marker only if icon is created (meaning Leaflet is loaded) */}
-      {icon && (
-        <Marker position={location} icon={icon}>
-          <Popup>
-            <div className="p-1 text-sm">
-               <h4 className="font-semibold mb-1">Sensor Location</h4>
-               <div className="flex items-center gap-1">
-                  <Thermometer className="w-4 h-4 text-red-500" />
-                  <span>
-                    Temp: {temperature !== null ? `${temperature.toFixed(1)}°C` : 'N/A'}
-                 </span>
-               </div>
-              {humidity !== undefined && ( // Check if humidity prop is provided
-                 <div className="flex items-center gap-1 mt-1">
-                    <Droplets className="w-4 h-4 text-blue-500" />
-                    <span>
-                      Humidity: {humidity !== null ? `${humidity.toFixed(1)}%` : 'N/A'}
-                    </span>
-                 </div>
-              )}
-            </div>
-          </Popup>
-        </Marker>
-      )}
-    </MapContainer>
-  );
-};
+  useEffect(() => {
+    if (!mounted || !mapContainerRef.current || mapRef.current) return;
 
-export default DynamicMap;
+    mapRef.current = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [lng, lat],
+      zoom: 12,
+    });
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, [mounted, lat, lng]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const marker = new mapboxgl.Marker()
+      .setLngLat([lng, lat])
+      .setPopup(
+        new mapboxgl.Popup().setHTML(`
+          <div>
+            <strong>${usingMock ? 'Mock Sensor' : 'Live Sensor'}</strong><br/>
+            🌡 Temp: ${sensorData.temperature?.toFixed(1) ?? 'N/A'}°C<br/>
+            💧 Humidity: ${sensorData.humidity?.toFixed(1) ?? 'N/A'}%
+          </div>
+        `)
+      )
+      .addTo(mapRef.current);
+
+    return () => {
+      marker.remove();
+    };
+  }, [sensorData, lat, lng, usingMock]);
+
+  return <div ref={mapContainerRef} className="w-full h-[500px] rounded-xl shadow" />;
+}
