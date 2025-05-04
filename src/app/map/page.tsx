@@ -1,9 +1,9 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import type { LatLngExpression, Icon as LeafletIconType } from 'leaflet'; // Rename Icon to avoid conflict
+import type { LatLngExpression, Icon as LeafletIconType, Map as LeafletMap } from 'leaflet'; // Rename Icon to avoid conflict, import Map type
 // Removed: import 'leaflet-defaulticon-compatibility'; // Import the JS part - moved to dynamic import
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -72,6 +72,8 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
+  const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance for cleanup
+
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -195,36 +197,55 @@ const MapPage: React.FC = () => {
   useEffect(() => {
     setIsClient(true); // Indicate we are now on the client
 
-    // Dynamically import Leaflet and compatibility script only on the client-side
-    Promise.all([
-      import('leaflet'),
-      import('leaflet-defaulticon-compatibility') // Import JS part dynamically
-    ]).then(([leaflet, compatibility]) => {
-      L = leaflet;
-      // Apply compatibility fixes for default icons AFTER L is loaded
-      // This might involve re-setting some default options if needed,
-      // but leaflet-defaulticon-compatibility should handle the basics.
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-          iconRetinaUrl: '/_next/static/media/marker-icon-2x.7a5e54a1.png', // Correct path via Next.js build
-          iconUrl: '/_next/static/media/marker-icon.a6931a99.png',       // Correct path via Next.js build
-          shadowUrl: '/_next/static/media/marker-shadow.d7400fd9.png',   // Correct path via Next.js build
-      });
+    let leafletLoadedPromise: Promise<[typeof import('leaflet'), any]>;
 
-      setLeafletLoaded(true); // Mark Leaflet as loaded *after* setup
-      // Data fetching can now happen as Leaflet is available
-      fetchCityTemperatures();
-      fetchUserLocationAndSensor();
-    }).catch(error => {
-         console.error("Failed to load Leaflet or compatibility script:", error);
-         setError("Map components could not be loaded."); // Set critical error
-         setLoadingCities(false);
-         setLoadingLocation(false);
-         setLoadingSensor(false);
-    });
+    if (!L) {
+        leafletLoadedPromise = Promise.all([
+            import('leaflet'),
+            import('leaflet-defaulticon-compatibility') // Import JS part dynamically
+        ]);
+
+        leafletLoadedPromise.then(([leaflet, compatibility]) => {
+            L = leaflet;
+            // Apply compatibility fixes for default icons AFTER L is loaded
+            delete (L.Icon.Default.prototype as any)._getIconUrl;
+            L.Icon.Default.mergeOptions({
+                iconRetinaUrl: '/_next/static/media/marker-icon-2x.7a5e54a1.png', // Correct path via Next.js build
+                iconUrl: '/_next/static/media/marker-icon.a6931a99.png',       // Correct path via Next.js build
+                shadowUrl: '/_next/static/media/marker-shadow.d7400fd9.png',   // Correct path via Next.js build
+            });
+            setLeafletLoaded(true); // Mark Leaflet as loaded *after* setup
+            // Data fetching can now happen as Leaflet is available
+            fetchCityTemperatures();
+            fetchUserLocationAndSensor();
+        }).catch(error => {
+             console.error("Failed to load Leaflet or compatibility script:", error);
+             setError("Map components could not be loaded."); // Set critical error
+             setLoadingCities(false);
+             setLoadingLocation(false);
+             setLoadingSensor(false);
+        });
+    } else {
+        // Leaflet already loaded, proceed with data fetching
+        setLeafletLoaded(true);
+        fetchCityTemperatures();
+        fetchUserLocationAndSensor();
+        leafletLoadedPromise = Promise.resolve([L, null]); // Resolve immediately
+    }
+
+    // Cleanup function to remove map instance
+    return () => {
+        if (mapRef.current) {
+            console.log("Cleaning up map instance.");
+            mapRef.current.remove();
+            mapRef.current = null;
+        }
+        // Potentially reset leafletLoaded state if needed on unmount, though might not be necessary
+        // setLeafletLoaded(false);
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array ensures this runs once on mount
+  }, []); // Empty dependency array ensures this runs once on mount and unmount
 
 
   const temperatureDifference = useMemo(() => {
@@ -314,8 +335,9 @@ const MapPage: React.FC = () => {
                     className="w-full h-full rounded-b-lg z-0"
                     style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
                     whenCreated={(mapInstance) => {
+                        mapRef.current = mapInstance; // Store map instance in ref
                         // Optional: Invalidate size if tiles don't load correctly initially
-                        setTimeout(() => mapInstance.invalidateSize(), 100);
+                        // setTimeout(() => mapInstance.invalidateSize(), 100);
                     }}
                   >
                      <MapUpdater center={mapCenter} zoom={mapZoom} />
