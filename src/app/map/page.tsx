@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { LatLngExpression, Icon as LeafletIconType } from 'leaflet'; // Rename Icon to avoid conflict
+import 'leaflet-defaulticon-compatibility'; // Import the JS part
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -12,7 +14,7 @@ import { getCityTemperature, CityTemperature } from '@/services/city-temperature
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
 
-// Dynamically import react-leaflet components and Leaflet library to avoid SSR issues
+// Dynamically import react-leaflet components to avoid SSR issues
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
@@ -21,19 +23,6 @@ const MapUpdater = dynamic(() => import('@/components/map-updater'), { ssr: fals
 
 // Import Leaflet library dynamically on the client-side
 let L: typeof import('leaflet') | null = null;
-if (typeof window !== 'undefined') {
-  import('leaflet').then(leaflet => {
-    L = leaflet;
-    // Fix default icon path issue with Leaflet in Next.js
-    delete (L.Icon.Default.prototype as any)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-        iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png').default.src,
-        iconUrl: require('leaflet/dist/images/marker-icon.png').default.src,
-        shadowUrl: require('leaflet/dist/images/marker-shadow.png').default.src,
-    });
-  });
-}
-
 
 interface CityData extends CityTemperature {
   lat: number;
@@ -81,7 +70,7 @@ const MapPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center for Leaflet
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
-  const [isMapReady, setIsMapReady] = useState(false); // Track if map container is ready
+  const [isClient, setIsClient] = useState(false); // Track if running on client
 
   // Fetch data functions remain the same...
     const fetchCityTemperatures = async () => {
@@ -167,17 +156,15 @@ const MapPage: React.FC = () => {
 
 
   useEffect(() => {
-    // Ensure Leaflet is loaded before fetching data or creating icons
-    const checkLeaflet = setInterval(() => {
-        if (L) {
-            clearInterval(checkLeaflet);
-            fetchCityTemperatures();
-            fetchUserLocationAndSensor();
-            setIsMapReady(true); // Indicate map components can be rendered
-        }
-    }, 100); // Check every 100ms
+    setIsClient(true); // Indicate we are now on the client
 
-    return () => clearInterval(checkLeaflet); // Cleanup interval on unmount
+    // Dynamically import Leaflet only on the client-side
+    import('leaflet').then(leaflet => {
+      L = leaflet;
+      // Data fetching can now happen as Leaflet is available
+      fetchCityTemperatures();
+      fetchUserLocationAndSensor();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -226,7 +213,21 @@ const MapPage: React.FC = () => {
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
   }, [userSensorData]); // L dependency removed
 
-  const isLoading = loadingCities || loadingLocation || loadingSensor || !isMapReady;
+  const isLoading = loadingCities || loadingLocation || loadingSensor || !isClient || !L; // Ensure L is loaded
+
+  // Render nothing or a placeholder on the server
+  if (!isClient) {
+    return (
+        <div className="container mx-auto p-4 md:p-8">
+            <Skeleton className="h-10 w-1/3 mb-6" />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <Skeleton className="lg:col-span-2 h-[564px]" /> {/* Approx Card height */}
+                <Skeleton className="h-[250px]" /> {/* Approx Card height */}
+            </div>
+        </div>
+    );
+  }
+
 
   return (
     <div className="container mx-auto p-4 md:p-8">
@@ -247,17 +248,17 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-             {/* MapContainer is always rendered, Skeleton overlays it */}
-              <MapContainer
-                center={mapCenter}
-                zoom={mapZoom}
-                scrollWheelZoom={true}
-                className="w-full h-full rounded-b-lg z-0"
-                style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
-                // placeholder={<Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" />} // Optional: use Leaflet's placeholder
-              >
-                {!isLoading && ( // Conditionally render map layers when not loading
-                  <>
+              {/* MapContainer is rendered only when not loading */}
+              {isLoading ? (
+                 <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10" />
+              ) : (
+                  <MapContainer
+                    center={mapCenter}
+                    zoom={mapZoom}
+                    scrollWheelZoom={true}
+                    className="w-full h-full rounded-b-lg z-0"
+                    style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
+                  >
                     <MapUpdater center={mapCenter} zoom={mapZoom} />
                     <TileLayer
                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -266,7 +267,7 @@ const MapPage: React.FC = () => {
 
                     {/* City Markers */}
                     {cityTemperatures.map((city) => (
-                      cityIcons[city.city] && ( // Ensure icon exists
+                      cityIcons[city.city] ? ( // Ensure icon exists
                           <Marker
                             key={city.city}
                             position={[city.lat, city.lng]}
@@ -279,6 +280,15 @@ const MapPage: React.FC = () => {
                                   </div>
                               </Popup>
                           </Marker>
+                      ) : ( // Use default Leaflet marker if custom icon failed
+                        <Marker key={city.city} position={[city.lat, city.lng]}>
+                             <Popup>
+                                  <div className="p-1">
+                                    <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
+                                    <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                                  </div>
+                              </Popup>
+                        </Marker>
                       )
                     ))}
 
@@ -296,11 +306,19 @@ const MapPage: React.FC = () => {
                           </Popup>
                         </Marker>
                     )}
-                  </>
-                )}
-              </MapContainer>
-              {/* Skeleton overlay */}
-              {isLoading && <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10" />}
+                    {/* Fallback default marker for user if custom icon fails */}
+                     {userLocation && userSensorData && !userIcon && (
+                         <Marker position={[userLocation.lat, userLocation.lng]}>
+                            <Popup>
+                              <div className="p-1">
+                                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
+                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+                              </div>
+                          </Popup>
+                         </Marker>
+                     )}
+                  </MapContainer>
+              )}
           </CardContent>
         </Card>
 
