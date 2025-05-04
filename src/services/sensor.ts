@@ -3,28 +3,44 @@
  */
 export interface SensorData {
   /**
-   * The temperature in Celsius.
+   * The temperature in Celsius. Can be null if reading failed.
    */
-  temperature: number;
+  temperature: number | null;
   /**
-   * The humidity percentage.
+   * The humidity percentage. Can be null if reading failed.
    */
-  humidity: number;
+  humidity: number | null;
 }
 
 /**
- * Asynchronously retrieves sensor data.
+ * Asynchronously retrieves mock sensor data.
+ * This function is used as a fallback when the real sensor is unavailable.
  *
- * @returns A promise that resolves to a SensorData object containing temperature and humidity.
+ * @returns A promise that resolves to a SensorData object containing mock temperature and humidity.
  */
 export async function getSensorData(): Promise<SensorData> {
-  // TODO: Implement this by calling the ESP32 API.
-  // The ESP32 API returns data like this:
-  // {"temperature":25.5,"humidity":60.2}
+  // Simulate potential network delay or sensor read time
+  await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
+
+  // Simulate occasional read errors for mock data
+  if (Math.random() < 0.05) { // 5% chance of error
+      console.warn("Mock Sensor: Simulating read error.");
+      return {
+          temperature: null, // Indicate error with null
+          humidity: null,
+      };
+  }
+
+
+  // Generate somewhat realistic fluctuating mock data
+  const baseTemp = 22;
+  const tempFluctuation = (Math.random() - 0.5) * 5; // +/- 2.5 degrees
+  const baseHumidity = 55;
+  const humidityFluctuation = (Math.random() - 0.5) * 10; // +/- 5%
 
   return {
-    temperature: 25.5,
-    humidity: 60.2,
+    temperature: parseFloat((baseTemp + tempFluctuation).toFixed(1)),
+    humidity: parseFloat((baseHumidity + humidityFluctuation).toFixed(1)),
   };
 }
 
@@ -33,26 +49,41 @@ export async function getSensorData(): Promise<SensorData> {
  */
 export interface SensorStatus {
   /**
-   * The status message.
+   * The status message (e.g., "OK", "Error", "Initializing").
    */
   status: string;
   /**
-   * The IP address of the sensor.
+   * The IP address of the sensor, or "N/A (Mock)" if using mock data.
    */
   ip: string;
 }
 
 /**
- * Asynchronously retrieves sensor status.
+ * Asynchronously retrieves mock sensor status.
+ * This function is used as a fallback when the real sensor is unavailable.
  *
- * @returns A promise that resolves to a SensorStatus object containing status and IP address.
+ * @returns A promise that resolves to a SensorStatus object containing mock status and IP.
  */
 export async function getSensorStatus(): Promise<SensorStatus> {
-  // TODO: Implement this by calling the ESP32 API.
-  // The ESP32 API returns data like this:
-  // {"status":"OK", "ip":"192.168.4.1"}
+   // Simulate potential network delay
+   await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
+
+    // Simulate occasional status issues for mock data
+   if (Math.random() < 0.02) { // 2% chance of non-OK status
+        console.warn("Mock Sensor: Simulating non-OK status.");
+       return {
+           status: 'Sensor Offline (Mock)', // Example non-OK status
+           ip: 'N/A (Mock)',
+       };
+   }
+
   return {
     status: 'OK',
-    ip: '192.168.4.1',
+    ip: 'N/A (Mock)', // Clearly indicate this is mock data
   };
 }
+
+// Note: The functions to fetch *real* data from an IP are now implemented
+// directly within the src/app/page.tsx component using the Fetch API,
+// as they depend on the IP address stored in localStorage, which is
+// only accessible client-side.

@@ -1,23 +1,24 @@
 'use client';
 
 import type { NextPage } from 'next';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Thermometer, Droplets, Lightbulb, AlertTriangle, User, PawPrint } from 'lucide-react';
-import { SensorData, getSensorData, SensorStatus, getSensorStatus } from '@/services/sensor';
+import { Thermometer, Droplets, Lightbulb, AlertTriangle, User, PawPrint, WifiOff, ServerCog } from 'lucide-react';
+import { SensorData, getSensorData as getMockSensorData, SensorStatus, getSensorStatus as getMockSensorStatus } from '@/services/sensor';
 import { generatePersonalizedSuggestions } from '@/ai/flows/generate-personalized-suggestions';
 import { generateKidsAndPetsSuggestions } from '@/ai/flows/generate-kids-and-pets-suggestions';
 import SensorChart from '@/components/sensor-chart';
 
-const initialSensorData = { temperature: 0, humidity: 0 };
+const initialSensorData: SensorData = { temperature: 0, humidity: 0 };
+const initialSensorStatus: SensorStatus = { status: 'Initializing', ip: 'N/A' };
 
 const Home: NextPage = () => {
   const [sensorData, setSensorData] = useState<SensorData>(initialSensorData);
-  const [sensorStatus, setSensorStatus] = useState<SensorStatus | null>(null);
+  const [sensorStatus, setSensorStatus] = useState<SensorStatus | null>(initialSensorStatus);
   const [suggestions, setSuggestions] = useState<string>('');
   const [kidsSuggestions, setKidsSuggestions] = useState<string[]>([]);
   const [petsSuggestions, setPetsSuggestions] = useState<string[]>([]);
@@ -25,87 +26,172 @@ const Home: NextPage = () => {
   const [loadingSuggestions, setLoadingSuggestions] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historicalData, setHistoricalData] = useState<SensorData[]>([]);
+  const [isClient, setIsClient] = useState(false);
+  const [sensorIp, setSensorIp] = useState<string | null>(null);
+  const [usingMockData, setUsingMockData] = useState(false);
 
-  const fetchData = async () => {
+   useEffect(() => {
+    setIsClient(true);
+    const storedIp = localStorage.getItem('sensorIp');
+    setSensorIp(storedIp);
+  }, []);
+
+
+ const fetchData = useCallback(async () => {
+    if (!isClient) return; // Don't run on server
+
     setLoadingData(true);
     setError(null);
-    try {
-      const [data, status] = await Promise.all([getSensorData(), getSensorStatus()]);
-      setSensorData(data);
-      setSensorStatus(status);
-      setHistoricalData((prev) => [...prev.slice(-29), data]); // Keep last 30 readings
-    } catch (err) {
-      console.error('Error fetching sensor data:', err);
-      setError('Failed to fetch sensor data. Please check the ESP32 connection.');
-      // Keep previous data on error? Or reset? Resetting for now.
-      // setSensorData(initialSensorData);
-      // setSensorStatus(null);
-    } finally {
-      setLoadingData(false);
-    }
-  };
+    setUsingMockData(false);
 
-  const fetchSuggestions = async (data: SensorData) => {
-     if (!data || data.temperature === 0) return; // Don't fetch if no valid data
+    let currentIp = localStorage.getItem('sensorIp'); // Get latest IP
+    setSensorIp(currentIp);
+
+    if (currentIp) {
+      // Attempt to fetch from the real sensor IP
+      try {
+        const [statusRes, dataRes] = await Promise.all([
+          fetch(`http://${currentIp}/status`).catch(e => { throw new Error(`Status fetch failed: ${e.message}`)}),
+          fetch(`http://${currentIp}/data`).catch(e => { throw new Error(`Data fetch failed: ${e.message}`)})
+        ]);
+
+        if (!statusRes.ok || !dataRes.ok) {
+           throw new Error(`Sensor response not OK (Status: ${statusRes.status}, Data: ${dataRes.status})`);
+        }
+
+        const [statusJson, dataJson]: [SensorStatus, SensorData] = await Promise.all([
+           statusRes.json().catch(() => { throw new Error('Failed to parse status JSON')}),
+           dataRes.json().catch(() => { throw new Error('Failed to parse data JSON')})
+        ]);
+
+        // Basic validation
+        if (typeof dataJson.temperature !== 'number' || typeof dataJson.humidity !== 'number') {
+            throw new Error('Invalid data format received from sensor.');
+        }
+
+
+        setSensorData(dataJson);
+        setSensorStatus(statusJson);
+        setHistoricalData((prev) => [...prev.slice(-29), dataJson]); // Keep last 30 readings
+        setError(null); // Clear previous errors on success
+
+
+      } catch (err: any) {
+        console.error('Error fetching real sensor data:', err);
+        setError(`Failed to connect to sensor at ${currentIp}: ${err.message}. Falling back to mock data.`);
+        // Fallback to mock data on error
+        const [mockData, mockStatus] = await Promise.all([getMockSensorData(), getMockSensorStatus()]);
+        setSensorData(mockData);
+        setSensorStatus({...mockStatus, ip: 'N/A (Mock)'}); // Indicate mock data
+        setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        setUsingMockData(true);
+      } finally {
+        setLoadingData(false);
+      }
+    } else {
+      // Use mock data if no IP is set
+      try {
+        const [mockData, mockStatus] = await Promise.all([getMockSensorData(), getMockSensorStatus()]);
+        setSensorData(mockData);
+        setSensorStatus({...mockStatus, ip: 'N/A (Mock)'}); // Indicate mock data
+        setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        setUsingMockData(true);
+        setError(null); // Clear error if previously set
+      } catch (mockErr) {
+          console.error('Error fetching mock sensor data:', mockErr);
+          setError('Failed to fetch mock sensor data.');
+          setSensorData(initialSensorData);
+          setSensorStatus({ status: 'Error', ip: 'N/A'});
+      } finally {
+          setLoadingData(false);
+      }
+    }
+  }, [isClient]); // Added isClient dependency
+
+
+  const fetchSuggestions = useCallback(async (data: SensorData) => {
+     if (!isClient || !data || (data.temperature === 0 && data.humidity === 0)) return; // Don't fetch if no valid data or on server
     setLoadingSuggestions(true);
     try {
+      // Use a default valid temp/humidity if current is 0,0 to avoid AI errors
+       const effectiveTemp = data.temperature === 0 && data.humidity === 0 ? 22 : data.temperature;
+       const effectiveHumidity = data.temperature === 0 && data.humidity === 0 ? 50 : data.humidity;
+
       const [personalizedResult, kidsResult, petsResult] = await Promise.all([
-        generatePersonalizedSuggestions({ temperature: data.temperature, humidity: data.humidity }),
-        generateKidsAndPetsSuggestions({ temperature: data.temperature, humidity: data.humidity, mode: 'kids' }),
-        generateKidsAndPetsSuggestions({ temperature: data.temperature, humidity: data.humidity, mode: 'pets' })
+        generatePersonalizedSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity }),
+        generateKidsAndPetsSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity, mode: 'kids' }),
+        generateKidsAndPetsSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity, mode: 'pets' })
       ]);
       setSuggestions(personalizedResult.suggestions);
       setKidsSuggestions(kidsResult.suggestions);
       setPetsSuggestions(petsResult.suggestions);
     } catch (err) {
       console.error('Error fetching AI suggestions:', err);
-      // Set a user-friendly error message or keep previous suggestions
-      // setError('Failed to load AI suggestions.');
       setSuggestions('Could not load suggestions at this time.');
       setKidsSuggestions(['Could not load suggestions.']);
       setPetsSuggestions(['Could not load suggestions.']);
+       // Optionally set a different error state for suggestions
     } finally {
       setLoadingSuggestions(false);
     }
-  };
+  }, [isClient]); // Added isClient dependency
 
 
-   // Initial fetch
+   // Initial fetch and setup interval
    useEffect(() => {
-    fetchData();
-  }, []);
+    if (isClient) {
+        fetchData(); // Initial fetch
+        const intervalId = setInterval(fetchData, 30000); // Fetch every 30 seconds
+        return () => clearInterval(intervalId); // Cleanup interval on unmount
+    }
+  }, [isClient, fetchData]); // Depend on isClient and fetchData
 
-  // Fetch suggestions when sensor data changes
+
+  // Fetch suggestions when sensor data (valid data) changes
   useEffect(() => {
-    if (sensorData && sensorData.temperature !== 0) { // Only fetch if data is valid
+    // Only fetch if data is not the initial 0,0 state
+    if (isClient && (sensorData.temperature !== 0 || sensorData.humidity !== 0)) {
         fetchSuggestions(sensorData);
     }
-  }, [sensorData]);
-
-
-  // Periodic fetch
-  useEffect(() => {
-    const intervalId = setInterval(fetchData, 30000); // Fetch every 30 seconds
-    return () => clearInterval(intervalId);
-  }, []);
+  }, [sensorData, fetchSuggestions, isClient]); // Depend on sensorData, fetchSuggestions, and isClient
 
 
   const getGeneralSuggestion = useMemo(() => {
-    if (loadingData || !sensorData) return null;
+    if (loadingData || !sensorData || (sensorData.temperature === 0 && sensorData.humidity === 0)) return null;
 
     const { temperature, humidity } = sensorData;
 
-    if (temperature > 30) {
-      return { icon: '🥵', text: "It's getting hot! Stay hydrated or turn on a fan." };
+    if (temperature > 30 && humidity > 60) {
+      return { icon: '🥵💧', text: "Hot and humid! Stay cool and hydrated. Consider A/C or dehumidifier." };
+    } else if (temperature > 30) {
+      return { icon: '🥵', text: "It's hot! Stay hydrated and find shade or use a fan." };
+    } else if (temperature < 15 && humidity < 40) {
+       return { icon: '🥶🌵', text: "Cold and dry. Bundle up and consider a humidifier." };
     } else if (temperature < 15) {
       return { icon: '🥶', text: "Feeling chilly? Grab a blanket or a warm drink." };
     } else if (humidity < 40) {
-      return { icon: '🌵', text: "Dry air – consider using a humidifier or watering plants." };
+      return { icon: '🌵', text: "Air is dry. Consider using a humidifier or moisturizing." };
     } else if (humidity > 70) {
-      return { icon: '💧', text: "High humidity! A dehumidifier might help." };
+      return { icon: '💧', text: "High humidity! A dehumidifier might help prevent stuffiness." };
     }
-    return { icon: '쾌', text: "Conditions seem comfortable right now." };
+    return { icon: '쾌', text: "Conditions seem comfortable right now." }; // Changed icon
   }, [sensorData, loadingData]);
+
+  // Render skeleton or minimal UI until client-side hydration
+  if (!isClient) {
+      return (
+        <div className="container mx-auto p-4 md:p-8 space-y-6">
+          <Skeleton className="h-8 w-1/3" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full md:col-span-2 lg:col-span-1" />
+          </div>
+          <Skeleton className="h-72 w-full mb-6" />
+          <Skeleton className="h-60 w-full" />
+        </div>
+      );
+  }
 
 
   return (
@@ -115,49 +201,61 @@ const Home: NextPage = () => {
        {error && (
          <Alert variant="destructive" className="mb-6">
            <AlertTriangle className="h-4 w-4" />
-           <AlertTitle>Error</AlertTitle>
+           <AlertTitle>Connection Error</AlertTitle>
            <AlertDescription>{error}</AlertDescription>
          </Alert>
        )}
 
-        {sensorStatus && sensorStatus.status !== 'OK' && (
+        {sensorStatus && sensorStatus.status !== 'OK' && !loadingData && !error && ( // Show only if not loading and no connection error
          <Alert variant="destructive" className="mb-6">
            <AlertTriangle className="h-4 w-4" />
            <AlertTitle>Sensor Status Alert</AlertTitle>
-           <AlertDescription>Sensor status: {sensorStatus.status}. IP: {sensorStatus.ip || 'N/A'}</AlertDescription>
+           <AlertDescription>Sensor reported status: {sensorStatus.status}. IP: {sensorStatus.ip || 'N/A'}</AlertDescription>
          </Alert>
        )}
+
+       {usingMockData && !error && !loadingData && ( // Show mock data info only if loaded and no connection error
+            <Alert variant="default" className="mb-6 border-blue-500 text-blue-800 dark:border-blue-400 dark:text-blue-300">
+               <ServerCog className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+               <AlertTitle>Using Mock Data</AlertTitle>
+               <AlertDescription>
+                 No sensor IP configured or connection failed. Displaying simulated data.
+                 Go to <a href="/settings" className="underline font-medium">Settings</a> to configure your sensor IP.
+               </AlertDescription>
+            </Alert>
+        )}
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Temperature</CardTitle>
-            <Thermometer className="h-5 w-5 text-accent" />
+             {loadingData ? <Skeleton className="h-5 w-5" /> : <Thermometer className="h-5 w-5 text-accent" />}
           </CardHeader>
           <CardContent>
             {loadingData ? (
               <Skeleton className="h-8 w-24" />
             ) : (
-              <div className="text-2xl font-bold">{sensorData.temperature.toFixed(1)}°C</div>
+              <div className="text-2xl font-bold">{sensorData.temperature?.toFixed(1) ?? 'N/A'}°C</div>
             )}
-            <p className="text-xs text-muted-foreground">
-              {sensorStatus ? `Sensor IP: ${sensorStatus.ip}` : 'Fetching status...'}
+            <p className="text-xs text-muted-foreground truncate">
+              {loadingData ? 'Fetching status...' : sensorStatus ? `Sensor IP: ${sensorStatus.ip || 'N/A'}` : 'Status unavailable'}
             </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Humidity</CardTitle>
-            <Droplets className="h-5 w-5 text-primary" />
+            {loadingData ? <Skeleton className="h-5 w-5" /> : <Droplets className="h-5 w-5 text-primary" />}
           </CardHeader>
           <CardContent>
             {loadingData ? (
               <Skeleton className="h-8 w-20" />
             ) : (
-              <div className="text-2xl font-bold">{sensorData.humidity.toFixed(1)}%</div>
+              <div className="text-2xl font-bold">{sensorData.humidity?.toFixed(1) ?? 'N/A'}%</div>
             )}
              <p className="text-xs text-muted-foreground">
-              {sensorStatus ? `Status: ${sensorStatus.status}` : '...'}
+              {loadingData ? '...' : sensorStatus ? `Status: ${sensorStatus.status || 'N/A'}` : '...'}
             </p>
           </CardContent>
         </Card>
@@ -173,6 +271,10 @@ const Home: NextPage = () => {
                  <span className="text-xl">{getGeneralSuggestion.icon}</span>
                  <p className="text-sm text-secondary-foreground">{getGeneralSuggestion.text}</p>
                </div>
+             ) : error || (sensorData.temperature === 0 && sensorData.humidity === 0) ? (
+               <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <WifiOff className="h-4 w-4"/> Awaiting valid sensor data...
+               </div>
              ) : (
                <p className="text-sm text-muted-foreground">No suggestion available.</p>
              )}
@@ -183,15 +285,17 @@ const Home: NextPage = () => {
       <Card className="mb-6">
          <CardHeader>
             <CardTitle>Sensor Analytics</CardTitle>
-            <CardDescription>Historical Temperature and Humidity Data</CardDescription>
+            <CardDescription>Historical Temperature and Humidity Data (Last 30 Readings)</CardDescription>
          </CardHeader>
          <CardContent>
-           {loadingData && historicalData.length === 0 ? (
+           {loadingData && historicalData.length < 2 ? ( // Show skeleton if loading and not enough data
              <Skeleton className="h-[300px] w-full" />
            ) : historicalData.length > 1 ? (
              <SensorChart data={historicalData} />
-           ) : (
-             <p className="text-muted-foreground text-center py-10">Insufficient data for chart. Waiting for more readings...</p>
+           ) : ( // Show message if not loading but still not enough data
+             <p className="text-muted-foreground text-center py-10">
+               {error ? 'Could not load data for chart.' : 'Insufficient data for chart. Waiting for more readings...'}
+             </p>
            )}
          </CardContent>
        </Card>
@@ -211,36 +315,36 @@ const Home: NextPage = () => {
             </TabsList>
             <TabsContent value="general">
               {loadingSuggestions ? (
-                 <div className="space-y-2">
+                 <div className="space-y-2 pt-2">
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-[80%]" />
                     <Skeleton className="h-4 w-[90%]" />
                   </div>
               ) : (
-                <p className="text-sm whitespace-pre-line">{suggestions || 'No suggestions available.'}</p>
+                <p className="text-sm whitespace-pre-line pt-2">{suggestions || 'No suggestions available at this time.'}</p>
               )}
             </TabsContent>
             <TabsContent value="kids">
               {loadingSuggestions ? (
-                <div className="space-y-2">
+                <div className="space-y-2 pt-2">
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-[80%]" />
                  </div>
               ) : (
-                <ul className="list-disc pl-5 space-y-1 text-sm">
-                  {kidsSuggestions.length > 0 ? kidsSuggestions.map((s, i) => <li key={`kid-${i}`}>{s}</li>) : <li>No specific suggestions for kids at this time.</li>}
+                <ul className="list-disc pl-5 space-y-1 text-sm pt-2">
+                  {kidsSuggestions.length > 0 ? kidsSuggestions.map((s, i) => <li key={`kid-${i}`}>{s}</li>) : <li>No specific suggestions for kids available.</li>}
                 </ul>
               )}
             </TabsContent>
             <TabsContent value="pets">
                {loadingSuggestions ? (
-                 <div className="space-y-2">
+                 <div className="space-y-2 pt-2">
                     <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-[80%]" />
+                    <Skeleton className="4 w-[80%]" />
                  </div>
                ) : (
-                <ul className="list-disc pl-5 space-y-1 text-sm">
-                   {petsSuggestions.length > 0 ? petsSuggestions.map((s, i) => <li key={`pet-${i}`}>{s}</li>) : <li>No specific suggestions for pets at this time.</li>}
+                <ul className="list-disc pl-5 space-y-1 text-sm pt-2">
+                   {petsSuggestions.length > 0 ? petsSuggestions.map((s, i) => <li key={`pet-${i}`}>{s}</li>) : <li>No specific suggestions for pets available.</li>}
                 </ul>
                )}
             </TabsContent>

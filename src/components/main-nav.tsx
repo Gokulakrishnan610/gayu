@@ -3,7 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Map, Settings, Thermometer } from 'lucide-react';
+import { Home, Map, Settings, Thermometer } from 'lucide-react'; // Added Settings icon
 
 import { cn } from '@/lib/utils';
 import {
@@ -62,7 +62,6 @@ export function MainNav() {
               </SidebarMenuButton>
             </Link>
           </SidebarMenuItem>
-           {/* Add more navigation items here if needed
            <SidebarMenuItem>
             <Link href="/settings" passHref legacyBehavior>
               <SidebarMenuButton
@@ -76,7 +75,7 @@ export function MainNav() {
                 </a>
               </SidebarMenuButton>
             </Link>
-          </SidebarMenuItem> */}
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarContent>
     </>

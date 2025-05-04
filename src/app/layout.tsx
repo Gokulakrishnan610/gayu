@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { SidebarProvider, Sidebar, SidebarInset } from '@/components/ui/sidebar';
 import { MainNav } from '@/components/main-nav';
 import { Toaster } from '@/components/ui/toaster';
-
+import { ThemeProvider } from '@/components/theme-provider'; // Import ThemeProvider
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -30,14 +30,20 @@ export default function RootLayout({
           inter.variable
         )}
       >
-         {/* Remove MapsProvider and APIProvider */}
-         <SidebarProvider defaultOpen={true}>
-           <Sidebar variant="sidebar" collapsible="icon" className="border-r">
-             <MainNav />
-           </Sidebar>
-           <SidebarInset>{children}</SidebarInset>
-           <Toaster />
-         </SidebarProvider>
+         <ThemeProvider
+            attribute="class"
+            defaultTheme="system" // Or 'light' / 'dark' if you don't want system preference
+            enableSystem
+            disableTransitionOnChange
+          >
+             <SidebarProvider defaultOpen={true}>
+               <Sidebar variant="sidebar" collapsible="icon" className="border-r">
+                 <MainNav />
+               </Sidebar>
+               <SidebarInset>{children}</SidebarInset>
+               <Toaster />
+             </SidebarProvider>
+         </ThemeProvider>
       </body>
     </html>
   );
