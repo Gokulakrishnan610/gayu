@@ -51,7 +51,8 @@ const createCustomIcon = (
     fontSize: number = 11,
     textColor: 'primary-foreground' | 'accent-foreground' = 'accent-foreground'
 ): LeafletIconType | null => { // Return type updated
-    if (!window.L) return null; // Check window.L
+    // Ensure this only runs client-side
+    if (typeof window === 'undefined' || !window.L) return null;
 
     const bgColorClass = color === 'primary' ? 'bg-primary' : 'bg-accent';
     const textColorClass = color === 'primary' ? 'text-primary-foreground' : 'text-accent-foreground';
@@ -76,7 +77,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance for cleanup
+  const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance
 
   const fetchCityTemperatures = useCallback(async () => {
     setLoadingCities(true);
@@ -166,7 +167,7 @@ const MapPage: React.FC = () => {
     setLoadingSensor(true);
 
     try {
-      if ('geolocation' in navigator) {
+      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const location: Location = { lat: position.coords.latitude, lng: position.coords.longitude };
@@ -207,23 +208,30 @@ const MapPage: React.FC = () => {
 
              // Apply compatibility fixes for default icons AFTER L is loaded
              // These paths point to where webpack copies the files
-             delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-             window.L.Icon.Default.mergeOptions({
-                 iconRetinaUrl: '/_next/static/media/marker-icon-2x.7a5e54a1.png', // Adjust based on your build output
-                 iconUrl: '/_next/static/media/marker-icon.a6931a99.png',
-                 shadowUrl: '/_next/static/media/marker-shadow.d7400fd9.png',
-             });
+             // Ensure L exists before manipulating its prototype/options
+            if (window.L) {
+                delete (window.L.Icon.Default.prototype as any)._getIconUrl;
+                window.L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                    iconUrl: '/_next/static/media/marker-icon.png',
+                    shadowUrl: '/_next/static/media/marker-shadow.png',
+                });
 
-            // Import compatibility JS after Leaflet is loaded
-            import('leaflet-defaulticon-compatibility').then(() => {
-                 setLeafletLoaded(true); // Mark Leaflet as fully loaded
-                 fetchCityTemperatures();
-                 fetchUserLocationAndSensor();
-            }).catch(error => {
-                 console.error("Failed to load Leaflet compatibility script:", error);
-                 setError("Map components could not be loaded.");
-                 setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
-            });
+                // Import compatibility JS after Leaflet and its options are set
+                import('leaflet-defaulticon-compatibility').then(() => {
+                     setLeafletLoaded(true); // Mark Leaflet as fully loaded
+                     fetchCityTemperatures();
+                     fetchUserLocationAndSensor();
+                }).catch(error => {
+                     console.error("Failed to load Leaflet compatibility script:", error);
+                     setError("Map components could not be loaded.");
+                     setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
+                });
+            } else {
+                console.error("Leaflet (L) failed to attach to window.");
+                setError("Map components failed to load properly.");
+                setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
+            }
 
         }).catch(error => {
              console.error("Failed to load Leaflet:", error);
@@ -252,13 +260,19 @@ const MapPage: React.FC = () => {
      // Cleanup map instance on component unmount
      return () => {
          if (mapRef.current) {
-             mapRef.current.remove(); // Remove the map instance
-             mapRef.current = null; // Nullify the ref
+             try {
+                 mapRef.current.remove(); // Remove the map instance
+             } catch (e) {
+                console.warn("Error removing map instance:", e);
+             } finally {
+                mapRef.current = null; // Nullify the ref regardless of error
+             }
          }
      };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient]); // Run only once when client-side is confirmed
+
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
@@ -289,7 +303,8 @@ const MapPage: React.FC = () => {
 
   // Memoize icons to prevent recreation on every render
     const cityIcons = useMemo(() => {
-      if (!window.L || !leafletLoaded) return {}; // Return empty if Leaflet not loaded
+      // Check isClient first before accessing window
+      if (!isClient || !window.L || !leafletLoaded) return {}; // Return empty if not ready
       return cityTemperatures.reduce((acc, city) => {
           const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
           if (icon) {
@@ -297,12 +312,13 @@ const MapPage: React.FC = () => {
           }
           return acc;
       }, {} as Record<string, LeafletIconType>);
-  }, [cityTemperatures, leafletLoaded]); // Add leafletLoaded dependency
+  }, [cityTemperatures, leafletLoaded, isClient]); // Add isClient dependency
 
   const userIcon = useMemo(() => {
-      if (!userSensorData || userSensorData.temperature === null || !window.L || !leafletLoaded) return null; // Check for L and leafletLoaded
+      // Check isClient first before accessing window
+      if (!isClient || !userSensorData || userSensorData.temperature === null || !window.L || !leafletLoaded) return null; // Check for L and leafletLoaded
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
-  }, [userSensorData, leafletLoaded]); // Add leafletLoaded dependency
+  }, [userSensorData, leafletLoaded, isClient]); // Add isClient dependency
 
   const isLoading = loadingCities || loadingLocation || loadingSensor || !leafletLoaded; // Include leafletLoaded in loading state
 
@@ -317,6 +333,7 @@ const MapPage: React.FC = () => {
        );
      }
 
+     // Only render MapContainer if not loading and on client + leaflet loaded
      return (
           <MapContainer
             center={mapCenter}
@@ -325,10 +342,20 @@ const MapPage: React.FC = () => {
             className="w-full h-full rounded-b-lg z-0"
             style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
             whenCreated={(mapInstance) => {
-                // Prevent re-initialization if ref already has a map
-                if (!mapRef.current) {
-                    mapRef.current = mapInstance;
-                }
+                 // Only set the ref if it's not already set
+                 if (!mapRef.current) {
+                     mapRef.current = mapInstance;
+                 } else {
+                    // If ref is already set, it means we might be in a hot-reload scenario
+                    // or StrictMode double-render. Try to remove the old one first.
+                    // This is a workaround for the "already initialized" error.
+                    try {
+                        mapRef.current.remove();
+                    } catch (e) {
+                       console.warn("Error removing existing map instance before recreation:", e);
+                    }
+                    mapRef.current = mapInstance; // Reassign ref to the new instance
+                 }
             }}
           >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
@@ -475,4 +502,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
