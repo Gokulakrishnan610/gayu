@@ -289,15 +289,16 @@ const MapPage: React.FC = () => {
        }
    }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leafletLoaded
 
-   // Fourth useEffect: Map cleanup
+   // Fourth useEffect: Map cleanup - This should robustly handle cleanup
    useEffect(() => {
     // This effect runs when the component unmounts
     return () => {
       if (mapRef.current) {
         try {
-          console.log("Attempting to remove map instance.");
+          console.log("Attempting to remove map instance during cleanup.");
+          mapRef.current.off(); // Unbind all event listeners
           mapRef.current.remove(); // Clean up the Leaflet map instance
-          mapRef.current = null; // Reset the ref
+          mapRef.current = null; // Reset the ref explicitly
           console.log("Map instance removed successfully.");
         } catch (e) {
           console.warn("Error removing map during cleanup:", e);
@@ -358,12 +359,24 @@ const MapPage: React.FC = () => {
              className="w-full h-full rounded-b-lg z-0"
              style={{ backgroundColor: 'hsl(var(--muted))' }}
              whenCreated={mapInstance => { // Use whenCreated to get the map instance
-                if (!mapRef.current) { // Prevent re-assigning if already set (due to StrictMode)
-                   console.log("Map instance created via whenCreated.");
+                // Avoid re-assigning if ref already holds a map (prevents StrictMode issue)
+                if (!mapRef.current) {
+                   console.log("Map instance assigned via whenCreated.");
                    mapRef.current = mapInstance;
+                } else {
+                    // If mapRef.current already exists, it might be from a previous render cycle (Strict Mode).
+                    // Ensure the new instance is used and potentially clean up the old one if necessary.
+                    // However, the cleanup effect should handle the old instance on unmount.
+                    console.log("Map instance already exists in ref, potentially due to Strict Mode. Using new instance from whenCreated.");
+                    // Optionally, you could try removing the old one here, but it's generally safer
+                    // to rely on the unmount cleanup effect.
+                    // if (mapRef.current !== mapInstance) {
+                    //    mapRef.current.remove(); // Risky if the old one is still active
+                    // }
+                    mapRef.current = mapInstance; // Assign the new instance
                 }
              }}
-             // Removed mapRef prop to avoid potential conflicts with whenCreated
+             // Removed mapRef prop - Rely solely on whenCreated for instance management
            >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
              <TileLayer
