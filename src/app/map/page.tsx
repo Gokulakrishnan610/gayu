@@ -71,7 +71,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance for cleanup
+  const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance for potential direct interaction
 
 
   const fetchCityTemperatures = async () => {
@@ -230,9 +230,6 @@ const MapPage: React.FC = () => {
         if (!userLocation || !userSensorData) fetchUserLocationAndSensor(); // Fetch if needed
     }
 
-    // No cleanup needed here anymore, MapContainer handles its own lifecycle
-    // The mapRef cleanup is handled in the MapContainer's whenCreated prop effect below
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient]); // Run only once when client-side is confirmed
 
@@ -355,24 +352,7 @@ const MapPage: React.FC = () => {
                     scrollWheelZoom={true}
                     className="w-full h-full rounded-b-lg z-0"
                     style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
-                     // Use whenCreated to get the map instance and manage it if needed, but rely on MapContainer's unmount for basic cleanup
-                    whenCreated={(mapInstance) => {
-                         mapRef.current = mapInstance; // Store ref if needed for direct interaction
-                         console.log("Map instance created.");
-                         // Ensure map is removed if component unmounts unexpectedly
-                         return () => {
-                            if (mapRef.current) {
-                                try {
-                                    mapRef.current.remove();
-                                    console.log("Map instance explicitly removed on cleanup (within whenCreated).");
-                                } catch (e) {
-                                     console.error("Error removing map instance during whenCreated cleanup:", e);
-                                } finally {
-                                    mapRef.current = null;
-                                }
-                            }
-                         };
-                    }}
+                    whenCreated={(mapInstance) => { mapRef.current = mapInstance; }} // Simplified: store instance if needed
                   >
                      <MapUpdater center={mapCenter} zoom={mapZoom} />
                      <TileLayer
