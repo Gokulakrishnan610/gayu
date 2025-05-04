@@ -311,12 +311,16 @@ const MapPage: React.FC = () => {
   useEffect(() => {
     return () => {
       if (mapRef.current) {
-         console.log("Removing map instance");
-         mapRef.current.remove();
-         mapRef.current = null;
+         console.log("Removing map instance during cleanup");
+         try {
+             mapRef.current.remove(); // Attempt to remove the map
+         } catch (e) {
+             console.warn("Error removing map instance:", e); // Log if removal fails
+         }
+         mapRef.current = null; // Always clear the ref
       }
     };
-  }, []);
+  }, []); // Empty dependency array ensures this runs only on unmount
 
 
   const temperatureDifference = useMemo(() => {
@@ -352,13 +356,25 @@ const MapPage: React.FC = () => {
 
   // Function to handle map creation - key to fixing the error
   const handleMapCreation = useCallback((map: LeafletMap) => {
-    // Only set the ref if it's not already set
-    if (!mapRef.current) {
-      console.log("Map instance created and stored in ref");
+    // This callback might be called multiple times by react-leaflet in StrictMode
+    // Only set the ref if it's null OR if the current ref is different from the new map instance
+    if (!mapRef.current || mapRef.current !== map) {
+      console.log("Map instance created or updated in ref");
+      // If there's an old map instance in the ref, attempt to remove it first
+      // This helps prevent the "already initialized" error in StrictMode
+      if (mapRef.current && mapRef.current !== map) {
+         console.log("Removing previous map instance before setting new one");
+         try {
+           mapRef.current.remove();
+         } catch (e) {
+           console.warn("Error removing previous map instance:", e);
+         }
+      }
       mapRef.current = map;
-      // Do not set mapMounted state here, rely on mapRef.current
+    } else {
+        console.log("Map instance already set and matches current ref.");
     }
-  }, []);
+  }, []); // Empty dependency array as it only interacts with the ref
 
   // Function to render the map content (markers, popups, etc.)
   const renderMapContent = () => {
@@ -455,14 +471,14 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
              {/* Conditionally render MapContainer only when fully ready */}
              {isClient && leafletLoaded && MapContainer ? (
-               <div key="map-container-wrapper" className="w-full h-full">
+               <div key="map-container-wrapper" className="w-full h-full"> {/* Ensure wrapper has key if needed */}
                 <MapContainer
                   center={mapCenter}
                   zoom={mapZoom}
                   scrollWheelZoom={true}
                   className="w-full h-full z-0"
                   style={{ backgroundColor: 'hsl(var(--muted))' }}
-                  ref={null} // Important: don't use ref directly on MapContainer
+                  // DO NOT use the ref prop here - use whenCreated
                   whenCreated={handleMapCreation} // Use our custom handler instead
                 >
                   {renderMapContent()}
