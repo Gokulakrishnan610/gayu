@@ -201,77 +201,67 @@ const MapPage: React.FC = () => {
   useEffect(() => {
     setIsClient(true); // Indicate we are now on the client
 
-    // Dynamically import Leaflet only on the client-side
-    if (typeof window !== 'undefined' && !window.L) {
-        import('leaflet').then(leaflet => {
-            window.L = leaflet; // Assign to window.L
+    let didInit = false; // Flag to track initialization
 
-             // Apply compatibility fixes for default icons AFTER L is loaded
-             // These paths point to where webpack copies the files
-             // Ensure L exists before manipulating its prototype/options
-            if (window.L) {
-                delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-                window.L.Icon.Default.mergeOptions({
-                    iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-                    iconUrl: '/_next/static/media/marker-icon.png',
-                    shadowUrl: '/_next/static/media/marker-shadow.png',
-                });
+    const loadLeaflet = async () => {
+        if (typeof window !== 'undefined' && !window.L && !didInit) {
+            didInit = true; // Mark as attempting initialization
+            try {
+                const leaflet = await import('leaflet');
+                window.L = leaflet;
 
-                // Import compatibility JS after Leaflet and its options are set
-                import('leaflet-defaulticon-compatibility').then(() => {
-                     setLeafletLoaded(true); // Mark Leaflet as fully loaded
-                     // Initial data fetch only after Leaflet is fully ready
-                     fetchCityTemperatures();
-                     fetchUserLocationAndSensor();
-                }).catch(error => {
-                     console.error("Failed to load Leaflet compatibility script:", error);
-                     setError("Map components could not be loaded.");
+                if (window.L) {
+                    delete (window.L.Icon.Default.prototype as any)._getIconUrl;
+                    window.L.Icon.Default.mergeOptions({
+                        iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                        iconUrl: '/_next/static/media/marker-icon.png',
+                        shadowUrl: '/_next/static/media/marker-shadow.png',
+                    });
+
+                    await import('leaflet-defaulticon-compatibility');
+                    setLeafletLoaded(true); // Mark Leaflet as fully loaded
+                    console.log("Leaflet and compatibility loaded successfully.");
+
+                    // Fetch data only after Leaflet is ready
+                    fetchCityTemperatures();
+                    fetchUserLocationAndSensor();
+
+                } else {
+                     console.error("Leaflet (L) failed to attach to window.");
+                     setError("Map components failed to load properly.");
                      setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
-                });
-            } else {
-                console.error("Leaflet (L) failed to attach to window.");
-                setError("Map components failed to load properly.");
+                }
+            } catch (error) {
+                console.error("Failed to load Leaflet or compatibility script:", error);
+                setError("Map components could not be loaded.");
                 setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
             }
+        } else if (typeof window !== 'undefined' && window.L && leafletLoaded) {
+             // Already loaded, fetch data if necessary (e.g., on page navigation)
+            if (cityTemperatures.length === 0) fetchCityTemperatures();
+            if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
+        }
+    };
 
-        }).catch(error => {
-             console.error("Failed to load Leaflet:", error);
-             setError("Map components could not be loaded.");
-             setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
-        });
-    } else if (typeof window !== 'undefined' && window.L && leafletLoaded) {
-        // Leaflet and compatibility script already loaded, fetch data if needed
-        if (cityTemperatures.length === 0) fetchCityTemperatures();
-        if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
-    } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
-         // Leaflet loaded, but compatibility script might not be (edge case)
-         import('leaflet-defaulticon-compatibility').then(() => {
-             setLeafletLoaded(true); // Mark Leaflet as fully loaded
-             if (cityTemperatures.length === 0) fetchCityTemperatures();
-             if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
-         }).catch(error => {
-              console.error("Failed to load Leaflet compatibility script (retry):", error);
-              setError("Map components could not be loaded.");
-              setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
-         });
-    }
+    loadLeaflet();
 
-    // Cleanup function to remove the map instance when the component unmounts or before re-rendering in StrictMode
+
+    // Cleanup function: remove map instance ONLY IF IT EXISTS
     return () => {
         if (mapRef.current) {
-             console.log("Attempting to remove map instance.");
+             console.log("Attempting to remove map instance during cleanup.");
              try {
-                 mapRef.current.remove(); // Remove the map instance cleanly
+                 mapRef.current.remove(); // Cleanly remove the map instance
              } catch (e) {
-                console.warn("Error removing map instance during cleanup:", e);
+                 console.warn("Error removing map instance:", e);
              } finally {
-                mapRef.current = null; // Nullify the ref after removal attempt
+                mapRef.current = null; // Nullify the ref AFTER removal attempt
                 console.log("Map instance reference set to null.");
              }
-         }
-     };
+        }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient]); // Only run on initial client confirmation
+  }, []); // Run only once on mount
 
 
   const temperatureDifference = useMemo(() => {
@@ -338,18 +328,11 @@ const MapPage: React.FC = () => {
             scrollWheelZoom={true}
             className="w-full h-full rounded-b-lg z-0"
             style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
-            whenCreated={(mapInstance) => {
-                // Assign the map instance to the ref.
-                // This replaces the previous approach using useState for the map instance.
-                if (mapRef.current === null) { // Check if ref is not already set
-                     console.log("Map instance created and assigned to ref.");
-                     mapRef.current = mapInstance;
-                } else {
-                    // This case might happen with React StrictMode double-invocation or hot-reloading.
-                    // We log it but don't re-assign if the ref already exists, preventing issues.
-                    console.warn("whenCreated called but mapRef.current already exists. Ignoring re-assignment.");
-                }
-            }}
+             whenCreated={(mapInstance) => {
+                 // Use ref to store the map instance. Important for cleanup.
+                 mapRef.current = mapInstance;
+                 console.log("Map instance created and assigned to ref.");
+             }}
           >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
              <TileLayer
