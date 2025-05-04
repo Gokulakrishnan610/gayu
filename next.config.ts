@@ -39,10 +39,10 @@ const nextConfig: NextConfig = {
                         to: path.join(__dirname, '.next/static/media'), // Adjust destination if needed
                     },
                      // Optional: If you were importing leaflet.css directly and still need it copied
-                     // {
-                     //   from: path.join(__dirname, 'node_modules/leaflet/dist/leaflet.css'),
-                     //   to: path.join(__dirname, '.next/static/css'),
-                     // },
+                     {
+                        from: path.join(__dirname, 'node_modules/leaflet/dist/leaflet.css'),
+                       to: path.join(__dirname, '.next/static/css'),
+                      },
                 ],
             })
         );
