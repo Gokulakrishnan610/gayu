@@ -152,7 +152,7 @@ const MapPage: React.FC = () => {
     const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center
     const [mapZoom, setMapZoom] = useState<number>(3); // Default zoom
     const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance
-    const [mapInstanceKey, setMapInstanceKey] = useState<number>(0); // Key to force remount
+    // Removed mapInstanceKey as it's a common source of the init error in StrictMode
 
     // --- Effects ---
 
@@ -229,9 +229,11 @@ const MapPage: React.FC = () => {
                         locationCoords = [locationJson.latitude, locationJson.longitude];
                         setLocation(locationCoords);
                         if (mapRef.current) {
-                            mapRef.current.setView(locationCoords, 10);
+                            // Fly to new location smoothly if map exists
+                            mapRef.current.flyTo(locationCoords, 10);
                         } else {
-                            setMapCenter(locationCoords); // Update initial center if map not ready
+                            // Set initial center/zoom if map doesn't exist yet
+                            setMapCenter(locationCoords);
                             setMapZoom(10);
                         }
                         setLocationError(null);
@@ -298,17 +300,17 @@ const MapPage: React.FC = () => {
         }
     }, [isClient, leafletLoaded, fetchUserDataAndLocation]); // fetchUserDataAndLocation is memoized
 
-    // Callback to set the map instance once it's created
+    // Callback to set the map instance once it's created by MapContainer's whenCreated prop
     const setMapInstance = useCallback((map: LeafletMap | null) => {
         if (map && !mapRef.current) { // Only set if map is valid and not already set
-            console.log("Map instance created and set.");
+            console.log("Map instance created and set via whenCreated.");
             mapRef.current = map;
             // If location is already known when map is first created, set view
             if (location) {
+                // Use setView instead of flyTo for initial positioning
                 map.setView(location, 10);
             }
         } else if (!map && mapRef.current) {
-            // This case might happen if the component unmounts, cleanup handled in useEffect return
              console.log("Map instance is being unset (likely during cleanup).");
              mapRef.current = null;
         }
@@ -344,7 +346,7 @@ const MapPage: React.FC = () => {
             }
             return acc;
         }, {} as { [key: string]: DivIcon });
-    }, [leafletLoaded, cityTemperatures]); // Added cityTemperatures dependency
+    }, [leafletLoaded, cityTemperatures]);
 
     // --- Render Logic ---
 
@@ -355,7 +357,8 @@ const MapPage: React.FC = () => {
              return <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg" />;
          }
 
-        // Render the map once client-side and leaflet are ready
+        // Render the map component once client-side and leaflet are ready
+        // The MapInner component handles the actual MapContainer logic.
         return (
             <MapInner
                 center={mapCenter}
@@ -413,6 +416,7 @@ const MapPage: React.FC = () => {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="h-[500px] p-0 relative">
+                     {/* Render the map or a skeleton based on readiness */}
                      {renderMapContent()}
                 </CardContent>
             </Card>
@@ -458,5 +462,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
-    
