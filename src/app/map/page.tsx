@@ -81,8 +81,8 @@ const MapInner = React.memo(({
     cityIcons: { [key: string]: DivIcon };
 }) => {
 
-    // Removed the local mapRef and useEffect that tried to manage cleanup.
-    // Relying solely on the `whenCreated` prop provided by react-leaflet MapContainer.
+    // This component now primarily focuses on rendering the map based on props.
+    // Lifecycle management (creation/destruction) is handled by react-leaflet's MapContainer.
 
     return (
          <MapContainer
@@ -157,7 +157,7 @@ const MapPage: React.FC = () => {
     const [locationError, setLocationError] = useState<string | null>(null);
     const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center
     const [mapZoom, setMapZoom] = useState<number>(3); // Default zoom
-    const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance
+    const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance for programmatic control
 
 
     // Static city data
@@ -203,14 +203,14 @@ const MapPage: React.FC = () => {
              setError("Map resources failed to load.");
         });
 
-         // Cleanup function for the map instance
-         return () => {
-            if (mapRef.current) {
-                console.log("MapPage unmounting: Removing map instance.");
-                mapRef.current.remove();
-                mapRef.current = null;
-            }
-        };
+         // Removed manual cleanup. Relying on react-leaflet's MapContainer cleanup.
+         // return () => {
+         //    if (mapRef.current) {
+         //        console.log("MapPage unmounting: Removing map instance.");
+         //        mapRef.current.remove();
+         //        mapRef.current = null;
+         //    }
+         // };
     }, []); // Empty dependency array ensures this runs only once on mount
 
 
@@ -316,30 +316,18 @@ const MapPage: React.FC = () => {
 
 
      // Callback to store the map instance from MapContainer's `whenCreated`
+     // Simplified logic: Just store the instance. View setting happens in fetchUserDataAndLocation.
      const whenMapCreated = useCallback((mapInstance: LeafletMap) => {
-        // Prevent setting ref multiple times if component re-renders unexpectedly
         if (!mapRef.current) {
-             mapRef.current = mapInstance;
-             console.log("Map instance created and ref set.");
-             // If we have a location and the map just got created, set the view
+            mapRef.current = mapInstance;
+            console.log("Map instance created and ref set.");
+            // Optionally, set initial view if location is already known when map is first created
+            // This might run before the first fetch completes, so check isLoading.
              if(location && !isLoading){
                  mapInstance.setView(location, 10);
              }
-        } else {
-            // If ref already exists, ensure it points to the latest instance
-            // This might happen with HMR or StrictMode causing double renders
-            if (mapRef.current !== mapInstance) {
-                 console.warn("Map instance recreated. Updating ref.");
-                 // Optionally remove the old one if it wasn't cleaned up properly
-                 // mapRef.current.remove();
-                 mapRef.current = mapInstance;
-                 // Re-apply view if needed
-                 if(location && !isLoading) {
-                      mapInstance.setView(location, 10);
-                 }
-            }
         }
-     }, [location, isLoading]); // Add location and isLoading as dependencies
+     }, [location, isLoading]); // Keep dependencies relevant to initial view setting if desired.
 
 
      // --- Memoized Values ---
@@ -410,6 +398,8 @@ const MapPage: React.FC = () => {
                      {!isClient || !leafletLoaded ? (
                          <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10" />
                      ) : (
+                         // Render MapInner which contains MapContainer.
+                         // MapInner handles the actual map rendering logic.
                          <MapInner
                              center={mapCenter}
                              zoom={mapZoom}
