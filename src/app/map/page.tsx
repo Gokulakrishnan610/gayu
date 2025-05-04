@@ -280,7 +280,7 @@ const MapPage: React.FC = () => {
       fetchUserLocationAndSensor();
     }
     // Intentionally NOT depending on fetch functions to run only once after load
-  }, [isClient, leafletLoaded, fetchCityTemperatures, fetchUserLocationAndSensor]); // Trigger data fetch when leaflet is ready
+  }, [isClient, leafletLoaded]); // Trigger data fetch when leaflet is ready
 
 
   // Fourth useEffect: Update icons when data or Leaflet state changes
@@ -306,6 +306,18 @@ const MapPage: React.FC = () => {
       }
     }
   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
+
+  // Cleanup map instance on unmount
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+         console.log("Removing map instance");
+         mapRef.current.remove();
+         mapRef.current = null;
+      }
+    };
+  }, []);
+
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
@@ -337,6 +349,16 @@ const MapPage: React.FC = () => {
   }, [userLocation, userSensorData, cityTemperatures]);
 
   const isLoading = loadingCities || loadingLocation || loadingSensor;
+
+  // Function to handle map creation - key to fixing the error
+  const handleMapCreation = useCallback((map: LeafletMap) => {
+    // Only set the ref if it's not already set
+    if (!mapRef.current) {
+      console.log("Map instance created and stored in ref");
+      mapRef.current = map;
+      // Do not set mapMounted state here, rely on mapRef.current
+    }
+  }, []);
 
   // Function to render the map content (markers, popups, etc.)
   const renderMapContent = () => {
@@ -433,21 +455,19 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
              {/* Conditionally render MapContainer only when fully ready */}
              {isClient && leafletLoaded && MapContainer ? (
+               <div key="map-container-wrapper" className="w-full h-full">
                 <MapContainer
                   center={mapCenter}
                   zoom={mapZoom}
                   scrollWheelZoom={true}
-                  className="w-full h-full z-0" // Ensure z-index is lower than potential overlays
+                  className="w-full h-full z-0"
                   style={{ backgroundColor: 'hsl(var(--muted))' }}
-                  whenCreated={instance => {
-                    if (!mapRef.current) { // Prevent re-assigning if ref already exists
-                      mapRef.current = instance;
-                    }
-                  }}
-                  whenReady={() => console.log("Map ready")} // Optional: log when map is ready
+                  ref={null} // Important: don't use ref directly on MapContainer
+                  whenCreated={handleMapCreation} // Use our custom handler instead
                 >
                   {renderMapContent()}
                 </MapContainer>
+               </div>
              ) : (
                // Show skeleton if not client-side or leaflet not loaded
                <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg">
