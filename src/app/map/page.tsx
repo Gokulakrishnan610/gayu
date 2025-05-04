@@ -248,8 +248,10 @@ const MapPage: React.FC = () => {
 
         } else if (typeof window !== 'undefined' && window.L) {
             // If L is already on window (e.g., StrictMode re-run), ensure loaded state is true
-            setLeafletLoaded(true);
-            console.log("Leaflet already loaded, ensuring state is set.");
+            if (!leafletLoaded) { // Only set state if it's currently false
+                 setLeafletLoaded(true);
+                 console.log("Leaflet already loaded, ensuring state is set.");
+            }
         } else {
           console.error("Attempted to load Leaflet on server.");
           setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
@@ -336,29 +338,10 @@ const MapPage: React.FC = () => {
 
   const isLoading = loadingCities || loadingLocation || loadingSensor;
 
-  // Function to render the map or a loading skeleton
-  // This is now simplified as MapContainer is rendered conditionally
+  // Function to render the map content (markers, popups, etc.)
   const renderMapContent = () => {
-    if (!isClient || !leafletLoaded) {
-       return (
-         <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg">
-           <Skeleton className="w-full h-full">
-             <p className="text-center p-4">Loading Map Resources...</p>
-           </Skeleton>
-         </div>
-       );
-    }
-    if (isLoading) {
-      return (
-         <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg z-10">
-           <Skeleton className="w-full h-full">
-             <p className="text-center p-4">Fetching Map Data...</p>
-           </Skeleton>
-         </div>
-      )
-    }
+     if (!MapContainer) return null; // Guard against MapContainer not being loaded yet
 
-     // Map content is rendered directly inside MapContainer if checks pass
      return (
        <>
          <MapUpdater center={mapCenter} zoom={mapZoom} />
