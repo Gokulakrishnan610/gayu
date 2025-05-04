@@ -50,8 +50,6 @@
 // }
 
 
-
-
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
@@ -59,7 +57,8 @@ import { cn } from '@/lib/utils';
 import { SidebarProvider, Sidebar, SidebarInset } from '@/components/ui/sidebar';
 import { MainNav } from '@/components/main-nav';
 import { Toaster } from '@/components/ui/toaster';
-import { ThemeProvider } from '@/components/theme-provider'; // Import ThemeProvider
+import { ThemeProvider } from '@/components/theme-provider';
+import { MobileHeader } from '@/components/mobile-header'; // Import the new MobileHeader
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
@@ -84,28 +83,26 @@ export default function RootLayout({
       >
          <ThemeProvider
             attribute="class"
-            defaultTheme="system" // Or 'light' / 'dark' if you don't want system preference
+            defaultTheme="system"
             enableSystem
             disableTransitionOnChange
           >
-             {/* Default state can be true (open) or false (closed), or based on cookie */}
              <SidebarProvider defaultOpen={true}>
-                {/*
-                    variant: 'sidebar' (default), 'floating', 'inset'
-                    collapsible: 'icon' (default), 'offcanvas', 'none'
-                    side: 'left' (default), 'right'
-                */}
                <Sidebar
                  variant="sidebar"
                  collapsible="icon"
-                 className="border-r" // Example: add border
+                 className="border-r"
                  side="left"
                 >
                  <MainNav />
                </Sidebar>
-               {/* SidebarInset handles the main content area layout */}
                <SidebarInset>
-                 {children}
+                  {/* Header for mobile toggle */}
+                  <MobileHeader />
+                  {/* Main page content */}
+                  <div className="flex-1 p-4 md:p-6 lg:p-8"> {/* Add padding for content */}
+                     {children}
+                  </div>
                </SidebarInset>
                <Toaster />
              </SidebarProvider>

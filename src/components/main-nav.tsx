@@ -82,8 +82,6 @@
 //   );
 // }
 
-
-
 'use client';
 
 import * as React from 'react';
@@ -100,24 +98,22 @@ import {
   SidebarTrigger,
   SidebarContent,
   useSidebar,
-  SidebarFooter, // Import SidebarFooter
+  SidebarFooter,
 } from '@/components/ui/sidebar';
-import { Button } from './ui/button';
+import { Button } from './ui/button'; // Keep Button import if SidebarTrigger uses it implicitly
 
 export function MainNav() {
   const pathname = usePathname();
-  const { state: sidebarState, toggleSidebar, isMobile, open } = useSidebar(); // Get sidebar state and toggle function
+  const { state: sidebarState, isMobile } = useSidebar(); // Get sidebar state, removed toggleSidebar as trigger is moved
 
   const navItems = [
       { href: '/', label: 'Dashboard', icon: Home, active: pathname === '/' },
       { href: '/map', label: 'Sensor Map', icon: Map, active: pathname === '/map' },
-      // Move Settings to the bottom
-      // { href: '/settings', label: 'Settings', icon: Settings, active: pathname === '/settings' },
   ];
 
   return (
     <>
-      {/* Header: Logo, Title, and Toggles */}
+      {/* Header: Logo, Title, and Desktop Toggle */}
       <SidebarHeader className="flex items-center justify-between p-2 md:p-3 border-b border-sidebar-border">
         <Link href="/" className="flex items-center gap-2 flex-grow overflow-hidden" aria-label="Go to Dashboard">
              <Thermometer className="w-6 h-6 md:w-7 md:h-7 text-primary shrink-0" />
@@ -131,39 +127,33 @@ export function MainNav() {
         </Link>
 
          {/* Desktop Trigger - Conditionally render based on variant/collapsible */}
+         {/* Ensure SidebarTrigger is correctly implemented or replace with Button if needed */}
          <SidebarTrigger className={cn(
-             "hidden md:flex shrink-0 ml-2",
-             sidebarState === 'collapsed' && 'rotate-180' // Optional: Rotate arrow when collapsed
+             "hidden md:flex shrink-0 ml-2"
+             // Optional rotation is handled internally by SidebarTrigger or needs manual state check
          )} />
 
-          {/* Mobile Burger Button (appears inside header on mobile) */}
-         <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden shrink-0" // Show only on mobile
-            onClick={toggleSidebar}
-            aria-label="Toggle Navigation Menu"
-          >
-            <PanelLeft className="w-6 h-6" />
-          </Button>
+         {/* Mobile Burger Button removed from here */}
+
       </SidebarHeader>
 
       {/* Main Navigation Content */}
-      <SidebarContent className="flex-1 px-2 md:px-3 py-2 overflow-y-auto"> {/* Allow scrolling if needed */}
+      <SidebarContent className="flex-1 px-2 md:px-3 py-2 overflow-y-auto">
         <SidebarMenu>
            {navItems.map((item) => (
                <SidebarMenuItem key={item.href}>
-                <Link href={item.href} passHref>
+                <Link href={item.href} passHref legacyBehavior>
                   <SidebarMenuButton
+                    asChild // Use asChild to pass props to the underlying <a> tag from Link
                     isActive={item.active}
-                    // Apply tooltip only when collapsed on desktop
                     tooltip={sidebarState === 'collapsed' && !isMobile ? { children: item.label, side: 'right' } : undefined}
                   >
-                    <item.icon className="shrink-0 w-5 h-5" /> {/* Consistent icon size */}
-                    {/* Span for text, hidden when collapsed */}
-                    <span className={cn("truncate", sidebarState === 'collapsed' && !isMobile && 'md:hidden')}>
-                      {item.label}
-                    </span>
+                    <a> {/* The actual element receiving button styles and props */}
+                      <item.icon className="shrink-0 w-5 h-5" />
+                      <span className={cn("truncate", sidebarState === 'collapsed' && !isMobile && 'md:hidden')}>
+                        {item.label}
+                      </span>
+                    </a>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
@@ -175,15 +165,18 @@ export function MainNav() {
       <SidebarFooter className="p-2 md:p-3 border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
-                <Link href="/settings" passHref>
+                <Link href="/settings" passHref legacyBehavior>
                   <SidebarMenuButton
+                    asChild
                     isActive={pathname === '/settings'}
                     tooltip={sidebarState === 'collapsed' && !isMobile ? { children: 'Settings', side: 'right' } : undefined}
                   >
-                    <Settings className="shrink-0 w-5 h-5" />
-                    <span className={cn("truncate", sidebarState === 'collapsed' && !isMobile && 'md:hidden')}>
-                      Settings
-                    </span>
+                    <a>
+                      <Settings className="shrink-0 w-5 h-5" />
+                      <span className={cn("truncate", sidebarState === 'collapsed' && !isMobile && 'md:hidden')}>
+                        Settings
+                      </span>
+                    </a>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
