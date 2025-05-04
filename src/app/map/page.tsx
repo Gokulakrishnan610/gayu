@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -72,7 +71,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
-  // Removed: const [mapInstanceKey, setMapInstanceKey] = useState(0); // Key to force MapContainer re-render
+  // Removed mapInstanceKey state as it can cause issues with strict mode / HMR
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -236,9 +235,7 @@ const MapPage: React.FC = () => {
       import('leaflet-defaulticon-compatibility') // Import JS part dynamically
     ]).then(([leaflet, _]) => {
       L = leaflet;
-      // No need to manually configure icon paths if compatibility lib is used
-      // delete (L.Icon.Default.prototype as any)._getIconUrl;
-      // L.Icon.Default.mergeOptions({ ... });
+      // leaflet-defaulticon-compatibility handles default icon paths
       setLeafletLoaded(true); // Mark Leaflet as loaded
       // Data fetching can now happen as Leaflet is available
       fetchCityTemperatures();
@@ -251,13 +248,8 @@ const MapPage: React.FC = () => {
          setLoadingSensor(false);
     });
 
-    // Removed resize handler for mapInstanceKey
-    // const handleResize = () => setMapInstanceKey(prevKey => prevKey + 1);
-    // window.addEventListener('resize', handleResize);
-    // handleResize(); // Initial key set
-
+    // Cleanup function is not strictly necessary for mapInstanceKey anymore
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    // return () => window.removeEventListener('resize', handleResize); // Cleanup listener
   }, []); // Empty dependency array ensures this runs once on mount
 
 
@@ -339,25 +331,22 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-              {/* MapContainer is always rendered, Skeleton overlays it when loading */}
-              <MapContainer
-                // Removed key={mapInstanceKey}
-                center={mapCenter}
-                zoom={mapZoom}
-                scrollWheelZoom={true}
-                className="w-full h-full rounded-b-lg z-0"
-                style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
-                whenCreated={(mapInstance) => {
-                    // Optional: Invalidate size if tiles don't load correctly initially
-                    setTimeout(() => mapInstance.invalidateSize(), 100);
-                }}
-              >
-                 {isLoading ? ( // Render Skeleton overlay if loading
-                  <div className="absolute inset-0 bg-muted/80 flex items-center justify-center z-10">
-                    <Skeleton className="w-3/4 h-3/4" />
-                  </div>
-                ) : ( // Render map layers only when not loading
-                   <>
+              {isLoading ? ( // Show Skeleton if loading
+                <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10 bg-muted/80 flex items-center justify-center">
+                   <p>Loading Map...</p>
+                </Skeleton>
+              ) : ( // Render MapContainer only when not loading
+                  <MapContainer
+                    center={mapCenter}
+                    zoom={mapZoom}
+                    scrollWheelZoom={true}
+                    className="w-full h-full rounded-b-lg z-0"
+                    style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
+                    whenCreated={(mapInstance) => {
+                        // Optional: Invalidate size if tiles don't load correctly initially
+                        setTimeout(() => mapInstance.invalidateSize(), 100);
+                    }}
+                  >
                      <MapUpdater center={mapCenter} zoom={mapZoom} />
                      <TileLayer
                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -416,9 +405,8 @@ const MapPage: React.FC = () => {
                             </Popup>
                            </Marker>
                        )}
-                   </>
+                  </MapContainer>
                 )}
-              </MapContainer>
           </CardContent>
         </Card>
 
@@ -473,5 +461,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
-    
