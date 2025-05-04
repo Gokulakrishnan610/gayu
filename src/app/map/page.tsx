@@ -77,7 +77,7 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3);
   const [isClient, setIsClient] = useState(false);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
-  const mapRef = useRef<LeafletMap | null>(null); // Ref to hold the Leaflet map instance
+  // Removed: const mapRef = useRef<LeafletMap | null>(null); // Ref is no longer needed
 
   // City and user icon states - need to be created client-side only
   const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
@@ -306,28 +306,9 @@ const MapPage: React.FC = () => {
     }
   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
 
-  // Use a map instance reference
-  const mapRefCb = useCallback((node: LeafletMap | null) => {
-    if (node !== null) {
-      mapRef.current = node;
-      console.log("Map instance created/updated and stored in ref.");
-    }
-  }, []);
+  // Removed: const mapRefCb = useCallback((node: LeafletMap | null) => {...});
+  // Removed: useEffect(() => { return () => {...} }, []); // Cleanup effect
 
-  // Cleanup map instance on component unmount
-  useEffect(() => {
-    return () => {
-      if (mapRef.current) {
-        console.log("Component unmounting, cleaning up map instance.");
-        try {
-          mapRef.current.remove(); // Properly remove the Leaflet map instance
-          mapRef.current = null; // Clear the ref
-        } catch (e) {
-          console.warn("Error removing map on unmount:", e);
-        }
-      }
-    };
-  }, []); // Empty dependency array ensures this runs only on unmount
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
@@ -448,7 +429,7 @@ const MapPage: React.FC = () => {
              {isClient && leafletLoaded && MapContainer ? (
                  // MapContainer is rendered inside the div
                  <MapContainer
-                   ref={mapRefCb} // Use the callback ref
+                   // Removed: ref={mapRefCb}
                    center={mapCenter}
                    zoom={mapZoom}
                    scrollWheelZoom={true}
