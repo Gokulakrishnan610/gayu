@@ -14,7 +14,7 @@ import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
 
 // Dynamically import react-leaflet components with ssr: false
-const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
+const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false, loading: () => <Skeleton className="w-full h-full" /> });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
 const Popup = dynamic(() => import('react-leaflet').then((mod) => mod.Popup), { ssr: false });
@@ -357,13 +357,8 @@ const MapPage: React.FC = () => {
              {/* Wrapper div that is always present */}
              <div className="absolute inset-0 w-full h-full rounded-b-lg">
                {/* Conditionally render MapContainer or Skeleton inside the wrapper */}
-               {!isClient || !leafletLoaded ? (
-                   <Skeleton className="w-full h-full flex items-center justify-center bg-muted/80">
-                     <p>Loading Map...</p>
-                   </Skeleton>
-                ) : (
-                   MapContainer && ( // Ensure MapContainer is loaded
-                      <MapContainer
+               {isClient && leafletLoaded ? (
+                    <MapContainer
                         center={mapCenter}
                         zoom={mapZoom}
                         scrollWheelZoom={true}
@@ -378,7 +373,7 @@ const MapPage: React.FC = () => {
                         />
 
                         {/* City Markers */}
-                        {cityTemperatures.map((city) => {
+                        {!loadingCities && cityTemperatures.map((city) => {
                           const icon = cityIconsState[city.city];
                           return icon ? (
                             <Marker
@@ -408,7 +403,7 @@ const MapPage: React.FC = () => {
 
 
                         {/* User Location Marker */}
-                        {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
+                        {!loadingLocation && !loadingSensor && userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
                           <Marker
                             key="user-location-marker"
                             position={[userLocation.lat, userLocation.lng]}
@@ -421,7 +416,7 @@ const MapPage: React.FC = () => {
                               </div>
                             </Popup>
                           </Marker>
-                        ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
+                        ) : !loadingLocation && userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
                           <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
                             <Popup>
                               <div className="p-1">
@@ -431,8 +426,11 @@ const MapPage: React.FC = () => {
                             </Popup>
                           </Marker>
                         ) : null}
-                      </MapContainer>
-                   )
+                    </MapContainer>
+                ) : (
+                   <Skeleton className="w-full h-full flex items-center justify-center bg-muted/80">
+                     <p>Loading Map...</p>
+                   </Skeleton>
                 )}
              </div>
           </CardContent>
@@ -488,5 +486,4 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
-    
+```
