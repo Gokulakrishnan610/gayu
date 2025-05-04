@@ -72,6 +72,8 @@ const MapPage: React.FC = () => {
   const [isClient, setIsClient] = useState(false); // Track if running on client
   const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
   const mapRef = useRef<LeafletMap | null>(null); // Ref to store the map instance for cleanup
+  // Key to force MapContainer re-creation and avoid initialization errors in Strict Mode
+  const [mapInstanceKey, setMapInstanceKey] = useState(Date.now());
 
 
   const fetchCityTemperatures = async () => {
@@ -165,8 +167,8 @@ const MapPage: React.FC = () => {
            const mockSensorData = await getSensorData(); // Fallback to mock on error
             setUserSensorData(mockSensorData);
         } catch (mockErr) {
-           console.error('Failed fetching mock sensor data:', mockErr);
-           setUserSensorData({ temperature: null, humidity: null });
+             console.error('Failed fetching mock sensor data:', mockErr);
+             setUserSensorData({ temperature: null, humidity: null });
         }
      } finally {
        setLoadingSensor(false); // Sensor attempt finished
@@ -249,11 +251,9 @@ const MapPage: React.FC = () => {
                 console.error("Error removing map instance:", e);
             } finally {
                 mapRef.current = null; // Clear the ref
+                setMapInstanceKey(Date.now()); // Update key to force recreation on remount
             }
         }
-        // Reset states if necessary for potential re-mounts
-        // setIsClient(false); // Keep this commented unless needed for specific re-rendering logic
-        // setLeafletLoaded(false);
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -372,23 +372,22 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
               {/* Render MapContainer only when on client and leaflet is loaded */}
               <MapContainer
+                key={mapInstanceKey} // Use key to force re-render and avoid initialization error
                 center={mapCenter}
                 zoom={mapZoom}
                 scrollWheelZoom={true}
                 className="w-full h-full rounded-b-lg z-0"
                 style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
                 whenCreated={(mapInstance) => {
-                    // Store map instance in ref only if it's not already set
-                    if (!mapRef.current) {
-                        mapRef.current = mapInstance;
+                     // Only store if ref is currently null (prevents issues in StrictMode)
+                     if (!mapRef.current) {
+                         mapRef.current = mapInstance;
                          console.log("Map instance created and stored in ref.");
-                    } else {
-                         console.log("Map instance already exists, reusing.");
-                         // Optionally update view if needed, though MapUpdater should handle this
-                         // mapRef.current.setView(mapCenter, mapZoom);
-                    }
-                     // Optional: Invalidate size if tiles don't load correctly initially
-                     // setTimeout(() => mapInstance.invalidateSize(), 100);
+                     } else {
+                          console.log("Map instance likely already exists due to Strict Mode remount, reusing.");
+                          // You might need to manually adjust the view if the state changed between renders
+                          // mapRef.current.setView(mapCenter, mapZoom);
+                     }
                 }}
               >
                  <MapUpdater center={mapCenter} zoom={mapZoom} />
