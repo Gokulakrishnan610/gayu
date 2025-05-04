@@ -65,9 +65,6 @@ const createCustomIcon = (
   });
 };
 
-// Create a unique ID for the map to prevent reinitialization issues
-const MAP_INSTANCE_ID = `map-${Math.random().toString(36).substring(2, 9)}`;
-
 const MapPage: React.FC = () => {
   const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
   const [userLocation, setUserLocation] = useState<Location | null>(null);
@@ -80,9 +77,8 @@ const MapPage: React.FC = () => {
   const [mapZoom, setMapZoom] = useState(3);
   const [isClient, setIsClient] = useState(false);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
-  // Adding a unique instance key to force fresh map creation
-  const [mapKey, setMapKey] = useState<string>(MAP_INSTANCE_ID);
-  const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance
+  const mapRef = useRef<LeafletMap | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null); // Ref for the container div
 
   // City and user icon states - need to be created client-side only
   const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
@@ -308,66 +304,27 @@ const MapPage: React.FC = () => {
     }
   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
 
-  // Handle errors with map initialization by regenerating map key
-  const regenerateMapKey = useCallback(() => {
-    // First, attempt to clean up any existing map instance
-    if (mapRef.current) {
-      try {
-        console.log("Cleaning up existing map before regenerating key");
-        mapRef.current.remove();
-      } catch (e) {
-        console.warn("Error cleaning up map:", e);
-      }
-      mapRef.current = null;
-    }
-    
-    // Generate a new unique key
-    const newKey = `map-${Math.random().toString(36).substring(2, 9)}`;
-    console.log("Regenerating map key:", newKey);
-    setMapKey(newKey);
+
+  // Handle map creation callback and store the map instance
+  const handleMapCreated = useCallback((map: LeafletMap) => {
+      mapRef.current = map;
+      console.log("Map instance created and stored in ref.");
   }, []);
 
-  // Updated map creation handler
-  const handleMapCreation = useCallback((map: LeafletMap) => {
-    console.log("Map instance created with key:", mapKey);
-    mapRef.current = map;
-  }, [mapKey]);
-
-  // Catch any error with map initialization
+  // Clean up map instance on component unmount
   useEffect(() => {
-    const handleMapError = (event: ErrorEvent) => {
-      if (event.message && event.message.includes("Map container is already initialized")) {
-        console.error("Caught map initialization error:", event.message);
-        // Only regenerate if we have a map reference that needs cleanup
-        regenerateMapKey();
-        // Prevent the error from bubbling up
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-
-    // Add global error handler for map initialization errors
-    if (isClient) {
-      window.addEventListener('error', handleMapError);
-    }
-
-    // Cleanup function: remove listener and map instance
     return () => {
-      if (isClient) {
-        window.removeEventListener('error', handleMapError);
-      }
-      // Clean up map on unmount or before remounting with new key
       if (mapRef.current) {
+        console.log("Component unmounting, cleaning up map instance.");
         try {
-          console.log("Cleaning up map instance on unmount/remount");
-          mapRef.current.remove();
-        } catch (e) {
-          console.warn("Error removing map on cleanup:", e);
+           mapRef.current.remove();
+           mapRef.current = null;
+        } catch(e){
+            console.warn("Error removing map on unmount:", e);
         }
-        mapRef.current = null;
       }
     };
-  }, [isClient, regenerateMapKey, mapKey]); // Rerun cleanup when mapKey changes
+  }, []); // Empty dependency array ensures this runs only on unmount
 
 
   const temperatureDifference = useMemo(() => {
@@ -403,8 +360,8 @@ const MapPage: React.FC = () => {
 
   // Function to render the map content (markers, popups, etc.)
   const renderMapContent = () => {
-     // Ensure MapContainer and its child components are defined before using them
-     if (!MapContainer || !TileLayer || !Marker || !Popup || !MapUpdater) {
+     // Ensure required components are loaded before using them
+     if (!isClient || !leafletLoaded || !MapContainer || !TileLayer || !Marker || !Popup || !MapUpdater) {
        return null;
      }
 
@@ -495,20 +452,24 @@ const MapPage: React.FC = () => {
           <CardContent className="h-[500px] p-0 relative">
              {/* Conditionally render MapContainer only when fully ready */}
              {isClient && leafletLoaded && MapContainer ? (
-               <div className="w-full h-full">
-                <MapContainer
-                  key={mapKey} // Use key prop here
-                  center={mapCenter}
-                  zoom={mapZoom}
-                  scrollWheelZoom={true}
-                  className="w-full h-full z-0"
-                  style={{ backgroundColor: 'hsl(var(--muted))' }}
-                  whenCreated={handleMapCreation}
-                  // Set a unique DOM ID to further prevent conflicts
-                  id={`leaflet-map-${mapKey}`}
-                >
-                  {renderMapContent()}
-                </MapContainer>
+               <div
+                 className="w-full h-full"
+                 // Use a stable ID for the container
+                 id="leaflet-map-container"
+                 ref={mapContainerRef} // Attach ref to the container div
+               >
+                 {/* MapContainer is rendered inside the div */}
+                 <MapContainer
+                   center={mapCenter}
+                   zoom={mapZoom}
+                   scrollWheelZoom={true}
+                   className="w-full h-full z-0"
+                   style={{ backgroundColor: 'hsl(var(--muted))' }}
+                   whenCreated={handleMapCreated} // Use whenCreated callback
+                   // Removed key prop as we are managing the instance with ref and cleanup
+                 >
+                   {renderMapContent()}
+                 </MapContainer>
                </div>
              ) : (
                // Show skeleton if not client-side or leaflet not loaded
