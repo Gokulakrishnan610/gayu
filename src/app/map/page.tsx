@@ -1,7 +1,9 @@
+// src/app/map/page.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Map, Marker, InfoWindow } from '@vis.gl/react-google-maps';
+import { Map, Marker, InfoWindow, useMapsLibrary } from '@vis.gl/react-google-maps';
+import type { MapSymbol } from '@vis.gl/react-google-maps'; // Import MapSymbol type
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -35,6 +37,18 @@ const MapPage: React.FC = () => {
   const [loadingSensor, setLoadingSensor] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState({ lat: 20, lng: 0 }); // Default center
+
+  // Load the 'marker' library which includes SymbolPath
+  const mapsLibrary = useMapsLibrary('marker');
+  const [SymbolPath, setSymbolPath] = useState<typeof google.maps.SymbolPath | null>(null);
+
+  useEffect(() => {
+    if (mapsLibrary) {
+      // Access SymbolPath once the library is loaded
+      setSymbolPath(mapsLibrary.SymbolPath);
+    }
+  }, [mapsLibrary]);
+
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
@@ -161,6 +175,31 @@ const MapPage: React.FC = () => {
       setSelectedCity(null);
    };
 
+   // Define marker options using useMemo, dependent on SymbolPath being loaded
+    const cityMarkerIcon = useMemo((): MapSymbol | null => {
+        if (!SymbolPath) return null;
+        return {
+            path: SymbolPath.CIRCLE,
+            fillColor: 'hsl(var(--accent))',
+            fillOpacity: 0.8,
+            strokeColor: 'hsl(var(--foreground))',
+            strokeWeight: 1,
+            scale: 8,
+        };
+    }, [SymbolPath]);
+
+    const userMarkerIcon = useMemo((): MapSymbol | null => {
+        if (!SymbolPath) return null;
+        return {
+            path: SymbolPath.CIRCLE,
+            fillColor: 'hsl(var(--primary))',
+            fillOpacity: 1,
+            strokeColor: 'hsl(var(--primary-foreground))',
+            strokeWeight: 2,
+            scale: 10,
+        };
+    }, [SymbolPath]);
+
 
   return (
     <div className="container mx-auto p-4 md:p-8">
@@ -181,7 +220,8 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0">
-             {(loadingLocation || loadingCities) && !userLocation ? (
+             {/* Wait for maps library and location before rendering map */}
+             {(loadingLocation || loadingCities || !mapsLibrary || !SymbolPath) && !userLocation ? (
                <Skeleton className="h-full w-full" />
              ) : (
                <Map
@@ -192,21 +232,14 @@ const MapPage: React.FC = () => {
                  disableDefaultUI={true}
                  className="w-full h-full rounded-b-lg"
                >
-                 {/* City Markers */}
-                 {cityTemperatures.map((city) => (
+                 {/* City Markers - Only render if icon is ready */}
+                 {cityMarkerIcon && cityTemperatures.map((city) => (
                    <Marker
                      key={city.city}
                      position={{ lat: city.lat, lng: city.lng }}
                      title={`${city.city}: ${city.temperature}°C`}
                      onClick={() => handleMarkerClick(city)}
-                     icon={{
-                       path: google.maps.SymbolPath.CIRCLE,
-                       fillColor: 'hsl(var(--accent))',
-                       fillOpacity: 0.8,
-                       strokeColor: 'hsl(var(--foreground))',
-                       strokeWeight: 1,
-                       scale: 8, // Adjust size as needed
-                     }}
+                     icon={cityMarkerIcon}
                      label={{
                         text: `${city.temperature.toFixed(0)}°`,
                         color: 'hsl(var(--accent-foreground))', // Ensure contrast
@@ -217,20 +250,13 @@ const MapPage: React.FC = () => {
                    />
                  ))}
 
-                 {/* User Location Marker */}
-                 {userLocation && userSensorData && (
+                 {/* User Location Marker - Only render if icon is ready */}
+                 {userLocation && userSensorData && userMarkerIcon && (
                      <Marker
                        position={userLocation}
                        title={`Your Location: ${userSensorData.temperature}°C`}
-                       icon={{
-                           path: google.maps.SymbolPath.CIRCLE, // Use a distinct shape or color
-                           fillColor: 'hsl(var(--primary))', // Use primary color
-                           fillOpacity: 1,
-                           strokeColor: 'hsl(var(--primary-foreground))',
-                           strokeWeight: 2,
-                           scale: 10, // Slightly larger
-                       }}
-                        label={{
+                       icon={userMarkerIcon}
+                       label={{
                           text: `${userSensorData.temperature.toFixed(0)}°`,
                           color: 'hsl(var(--primary-foreground))',
                           fontSize: '11px',
