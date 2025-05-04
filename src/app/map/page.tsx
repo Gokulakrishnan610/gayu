@@ -171,7 +171,7 @@ const MapPage: React.FC = () => {
 
 
   const temperatureDifference = useMemo(() => {
-    if (!userLocation || !userSensorData || cityTemperatures.length === 0) return null;
+    if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
 
     let nearestCity: CityData | null = null;
     let minDistance = Infinity;
@@ -187,7 +187,7 @@ const MapPage: React.FC = () => {
       }
     });
 
-    if (!nearestCity || !userSensorData) return null;
+    if (!nearestCity || !userSensorData || userSensorData.temperature === null) return null;
 
     const diff = userSensorData.temperature - nearestCity.temperature;
     return {
@@ -210,7 +210,7 @@ const MapPage: React.FC = () => {
   }, [cityTemperatures, leafletLoaded]); // Add leafletLoaded dependency
 
   const userIcon = useMemo(() => {
-      if (!userSensorData || !L || !leafletLoaded) return null; // Check for L and leafletLoaded
+      if (!userSensorData || userSensorData.temperature === null || !L || !leafletLoaded) return null; // Check for L and leafletLoaded
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
   }, [userSensorData, leafletLoaded]); // Add leafletLoaded dependency
 
@@ -249,17 +249,22 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-              {/* MapContainer is rendered only when not loading */}
-              {isLoading ? (
-                 <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg z-10" />
-              ) : (
-                  <MapContainer
-                    center={mapCenter}
-                    zoom={mapZoom}
-                    scrollWheelZoom={true}
-                    className="w-full h-full rounded-b-lg z-0"
-                    style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
-                  >
+              {/* MapContainer is always rendered, Skeleton overlays it when loading */}
+              <MapContainer
+                center={mapCenter}
+                zoom={mapZoom}
+                scrollWheelZoom={true}
+                className="w-full h-full rounded-b-lg z-0"
+                style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
+              >
+                {/* Overlay Skeleton when loading */}
+                {isLoading && (
+                    <div className="absolute inset-0 w-full h-full bg-background/80 flex items-center justify-center z-10 rounded-b-lg">
+                      <Skeleton className="h-3/4 w-3/4" />
+                    </div>
+                )}
+                 {!isLoading && ( // Render map contents only when not loading
+                   <>
                     <MapUpdater center={mapCenter} zoom={mapZoom} />
                     <TileLayer
                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
@@ -294,7 +299,7 @@ const MapPage: React.FC = () => {
                     ))}
 
                     {/* User Location Marker */}
-                    {userLocation && userSensorData && userIcon && (
+                    {userLocation && userSensorData && userSensorData.temperature !== null && userIcon && (
                         <Marker
                           position={[userLocation.lat, userLocation.lng]}
                           icon={userIcon}
@@ -307,19 +312,20 @@ const MapPage: React.FC = () => {
                           </Popup>
                         </Marker>
                     )}
-                    {/* Fallback default marker for user if custom icon fails */}
-                     {userLocation && userSensorData && !userIcon && (
+                    {/* Fallback default marker for user if custom icon fails or temp is null */}
+                     {userLocation && userSensorData && (!userIcon || userSensorData.temperature === null) && (
                          <Marker position={[userLocation.lat, userLocation.lng]}>
                             <Popup>
                               <div className="p-1">
                                 <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
+                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature?.toFixed(1) ?? 'N/A'}°C</p>
                               </div>
                           </Popup>
                          </Marker>
                      )}
-                  </MapContainer>
-              )}
+                   </>
+                 )}
+              </MapContainer>
           </CardContent>
         </Card>
 
@@ -346,7 +352,7 @@ const MapPage: React.FC = () => {
                 </p>
                  <p className="flex items-center gap-2">
                   <Thermometer className="h-5 w-5 text-accent" />
-                  <span className="font-semibold">{userSensorData.temperature.toFixed(1)}°C</span>
+                  <span className="font-semibold">{userSensorData.temperature?.toFixed(1) ?? 'N/A'}°C</span>
                    <span className="text-sm text-muted-foreground">(Your Sensor)</span>
                 </p>
                  <p className="flex items-center gap-2">
