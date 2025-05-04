@@ -131,7 +131,7 @@ const MapPage: React.FC = () => {
  const fetchSensorDataForLocation = async (forceMock = false) => {
     setLoadingSensor(true); // Ensure loading sensor state is true at the start
     try {
-        const storedIp = localStorage.getItem('sensorIp');
+        const storedIp = typeof window !== 'undefined' ? localStorage.getItem('sensorIp') : null; // Check window
         let sensorData: SensorData;
         let connectionError = null;
 
@@ -226,27 +226,15 @@ const MapPage: React.FC = () => {
     } else if (L) {
         // Leaflet already loaded, proceed with data fetching
         setLeafletLoaded(true);
-        fetchCityTemperatures();
-        fetchUserLocationAndSensor();
+        if (cityTemperatures.length === 0) fetchCityTemperatures(); // Avoid re-fetch if already loaded
+        if (!userLocation || !userSensorData) fetchUserLocationAndSensor(); // Fetch if needed
     }
 
-    // Return a cleanup function for the effect
-    return () => {
-        // Cleanup map instance on component unmount
-        if (mapRef.current) {
-            try {
-                mapRef.current.remove();
-                console.log("Map instance removed on cleanup.");
-            } catch (e) {
-                console.error("Error removing map instance during cleanup:", e);
-            } finally {
-                 mapRef.current = null; // Ensure ref is cleared
-            }
-        }
-    };
+    // No cleanup needed here anymore, MapContainer handles its own lifecycle
+    // The mapRef cleanup is handled in the MapContainer's whenCreated prop effect below
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array ensures this runs once on mount and cleanup on unmount
+  }, [isClient]); // Run only once when client-side is confirmed
 
 
   const temperatureDifference = useMemo(() => {
@@ -367,10 +355,23 @@ const MapPage: React.FC = () => {
                     scrollWheelZoom={true}
                     className="w-full h-full rounded-b-lg z-0"
                     style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
+                     // Use whenCreated to get the map instance and manage it if needed, but rely on MapContainer's unmount for basic cleanup
                     whenCreated={(mapInstance) => {
-                         // Set the map instance to the ref
-                         mapRef.current = mapInstance;
-                         console.log("Map instance created and stored in ref.");
+                         mapRef.current = mapInstance; // Store ref if needed for direct interaction
+                         console.log("Map instance created.");
+                         // Ensure map is removed if component unmounts unexpectedly
+                         return () => {
+                            if (mapRef.current) {
+                                try {
+                                    mapRef.current.remove();
+                                    console.log("Map instance explicitly removed on cleanup (within whenCreated).");
+                                } catch (e) {
+                                     console.error("Error removing map instance during whenCreated cleanup:", e);
+                                } finally {
+                                    mapRef.current = null;
+                                }
+                            }
+                         };
                     }}
                   >
                      <MapUpdater center={mapCenter} zoom={mapZoom} />
@@ -499,4 +500,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-```
