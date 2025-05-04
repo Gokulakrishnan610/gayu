@@ -1,3 +1,4 @@
+
 // src/app/map/page.tsx
 'use client';
 
@@ -11,6 +12,7 @@ import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
 import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor'; // Import sensor data function
+import { useMapsContext } from '@/contexts/maps-context'; // Import the context hook
 
 interface CityData extends CityTemperature {
   lat: number;
@@ -28,6 +30,7 @@ const CITIES = [
 ];
 
 const MapPage: React.FC = () => {
+  const { isMapsApiAvailable } = useMapsContext(); // Use the context hook
   const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [userSensorData, setUserSensorData] = useState<SensorData | null>(null);
@@ -38,13 +41,14 @@ const MapPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState({ lat: 20, lng: 0 }); // Default center
 
-  // Load the 'marker' library which includes SymbolPath
-  const mapsLibrary = useMapsLibrary('marker');
+  // Load the 'marker' library which includes SymbolPath - only if API is available
+  const mapsLibrary = useMapsLibrary(isMapsApiAvailable ? 'marker' : null);
   const [SymbolPath, setSymbolPath] = useState<typeof google.maps.SymbolPath | null>(null);
 
+
   useEffect(() => {
-    if (mapsLibrary) {
-      // Access SymbolPath once the library is loaded
+    // Ensure maps library is loaded and SymbolPath is available before setting state
+    if (mapsLibrary && mapsLibrary.SymbolPath) {
       setSymbolPath(mapsLibrary.SymbolPath);
     }
   }, [mapsLibrary]);
@@ -76,12 +80,14 @@ const MapPage: React.FC = () => {
     setError(null);
     try {
       // Use browser geolocation first if available
-      if (navigator.geolocation) {
+      if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const location = { lat: position.coords.latitude, lng: position.coords.longitude };
             setUserLocation(location);
-            setMapCenter(location); // Center map on user location
+             if (isMapsApiAvailable) { // Only center map if API is available
+               setMapCenter(location);
+             }
             setLoadingLocation(false);
 
             // Now fetch sensor data
@@ -124,7 +130,9 @@ const MapPage: React.FC = () => {
        ]);
        setUserLocation(location);
        setUserSensorData(sensorData);
-       setMapCenter(location);
+        if (isMapsApiAvailable) { // Only center map if API is available
+            setMapCenter(location);
+        }
      } catch (apiError) {
        console.error('Error fetching location/sensor from API:', apiError);
        setError('Could not retrieve location or sensor data from backup services.');
@@ -138,7 +146,8 @@ const MapPage: React.FC = () => {
   useEffect(() => {
     fetchCityTemperatures();
     fetchUserLocationAndSensor();
-  }, []);
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Keep dependencies minimal for initial fetch
 
   const temperatureDifference = useMemo(() => {
     if (!userLocation || !userSensorData || cityTemperatures.length === 0) return null;
@@ -148,6 +157,7 @@ const MapPage: React.FC = () => {
     let minDistance = Infinity;
 
     cityTemperatures.forEach(city => {
+      if (!userLocation) return; // Guard against null userLocation
       const distance = Math.sqrt(
         Math.pow(userLocation.lat - city.lat, 2) + Math.pow(userLocation.lng - city.lng, 2)
       );
@@ -157,7 +167,7 @@ const MapPage: React.FC = () => {
       }
     });
 
-    if (!nearestCity) return null;
+    if (!nearestCity || !userSensorData) return null; // Guard against null values
 
     const diff = userSensorData.temperature - nearestCity.temperature;
     return {
@@ -191,7 +201,7 @@ const MapPage: React.FC = () => {
     const userMarkerIcon = useMemo((): MapSymbol | null => {
         if (!SymbolPath) return null;
         return {
-            path: SymbolPath.CIRCLE,
+            path: SymbolPath.CIRCLE, // Use the loaded SymbolPath
             fillColor: 'hsl(var(--primary))',
             fillOpacity: 1,
             strokeColor: 'hsl(var(--primary-foreground))',
@@ -220,67 +230,71 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0">
-             {/* Wait for maps library and location before rendering map */}
-             {(loadingLocation || loadingCities || !mapsLibrary || !SymbolPath) && !userLocation ? (
-               <Skeleton className="h-full w-full" />
-             ) : (
-               <Map
-                 mapId={'ecosense-map'} // Optional: for custom styling
-                 defaultCenter={mapCenter}
-                 defaultZoom={3}
-                 gestureHandling={'greedy'}
-                 disableDefaultUI={true}
-                 className="w-full h-full rounded-b-lg"
-               >
-                 {/* City Markers - Only render if icon is ready */}
-                 {cityMarkerIcon && cityTemperatures.map((city) => (
-                   <Marker
-                     key={city.city}
-                     position={{ lat: city.lat, lng: city.lng }}
-                     title={`${city.city}: ${city.temperature}°C`}
-                     onClick={() => handleMarkerClick(city)}
-                     icon={cityMarkerIcon}
-                     label={{
-                        text: `${city.temperature.toFixed(0)}°`,
-                        color: 'hsl(var(--accent-foreground))', // Ensure contrast
-                        fontSize: '10px',
-                        fontWeight: 'bold',
-                      }}
+             {/* Show message if API key is missing */}
+              {!isMapsApiAvailable ? (
+                 <div className="flex items-center justify-center h-full w-full bg-muted rounded-b-lg">
+                    <p className="text-muted-foreground">Map disabled. Google Maps API Key is missing.</p>
+                 </div>
+              ) : (loadingLocation || loadingCities || !SymbolPath) ? ( // Show skeleton while loading data or library
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <Map
+                  mapId={'ecosense-map'} // Optional: for custom styling
+                  defaultCenter={mapCenter}
+                  defaultZoom={3}
+                  gestureHandling={'greedy'}
+                  disableDefaultUI={true}
+                  className="w-full h-full rounded-b-lg"
+                >
+                  {/* City Markers - Only render if icon is ready */}
+                  {cityMarkerIcon && cityTemperatures.map((city) => (
+                    <Marker
+                      key={city.city}
+                      position={{ lat: city.lat, lng: city.lng }}
+                      title={`${city.city}: ${city.temperature}°C`}
+                      onClick={() => handleMarkerClick(city)}
+                      icon={cityMarkerIcon} // Use the memoized icon object
+                      label={{
+                         text: `${city.temperature.toFixed(0)}°`,
+                         color: 'hsl(var(--accent-foreground))', // Ensure contrast
+                         fontSize: '10px',
+                         fontWeight: 'bold',
+                       }}
 
-                   />
-                 ))}
+                    />
+                  ))}
 
-                 {/* User Location Marker - Only render if icon is ready */}
-                 {userLocation && userSensorData && userMarkerIcon && (
-                     <Marker
-                       position={userLocation}
-                       title={`Your Location: ${userSensorData.temperature}°C`}
-                       icon={userMarkerIcon}
-                       label={{
-                          text: `${userSensorData.temperature.toFixed(0)}°`,
-                          color: 'hsl(var(--primary-foreground))',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                        }}
-                     />
-                 )}
-                  {/* Info Window for Selected City */}
-                   {selectedCity && (
-                     <InfoWindow
-                       position={{ lat: selectedCity.lat, lng: selectedCity.lng }}
-                       onCloseClick={handleInfoWindowClose}
-                       // Options to prevent map panning when info window opens
-                        // disableAutoPan={true}
-                     >
-                       <div className="p-1">
-                         <h4 className="font-semibold text-sm mb-1">{selectedCity.city}</h4>
-                         <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{selectedCity.temperature.toFixed(1)}°C</p>
-                       </div>
-                     </InfoWindow>
-                   )}
+                  {/* User Location Marker - Only render if icon is ready */}
+                  {userLocation && userSensorData && userMarkerIcon && (
+                      <Marker
+                        position={userLocation}
+                        title={`Your Location: ${userSensorData.temperature}°C`}
+                        icon={userMarkerIcon} // Use the memoized icon object
+                        label={{
+                           text: `${userSensorData.temperature.toFixed(0)}°`,
+                           color: 'hsl(var(--primary-foreground))',
+                           fontSize: '11px',
+                           fontWeight: 'bold',
+                         }}
+                      />
+                  )}
+                   {/* Info Window for Selected City */}
+                    {selectedCity && (
+                      <InfoWindow
+                        position={{ lat: selectedCity.lat, lng: selectedCity.lng }}
+                        onCloseClick={handleInfoWindowClose}
+                        // Options to prevent map panning when info window opens
+                         // disableAutoPan={true}
+                      >
+                        <div className="p-1">
+                          <h4 className="font-semibold text-sm mb-1">{selectedCity.city}</h4>
+                          <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{selectedCity.temperature.toFixed(1)}°C</p>
+                        </div>
+                      </InfoWindow>
+                    )}
 
-               </Map>
-             )}
+                </Map>
+              )}
           </CardContent>
         </Card>
 
