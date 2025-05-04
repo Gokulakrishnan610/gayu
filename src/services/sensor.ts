@@ -1,3 +1,4 @@
+
 /**
  * Represents sensor data containing temperature and humidity.
  */
@@ -87,3 +88,5 @@ export async function getSensorStatus(): Promise<SensorStatus> {
 // directly within the src/app/page.tsx component using the Fetch API,
 // as they depend on the IP address stored in localStorage, which is
 // only accessible client-side.
+
+    

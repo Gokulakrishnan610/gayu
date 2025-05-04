@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { NextPage } from 'next';
@@ -13,7 +14,7 @@ import { generatePersonalizedSuggestions } from '@/ai/flows/generate-personalize
 import { generateKidsAndPetsSuggestions } from '@/ai/flows/generate-kids-and-pets-suggestions';
 import SensorChart from '@/components/sensor-chart';
 
-const initialSensorData: SensorData = { temperature: 0, humidity: 0 };
+const initialSensorData: SensorData = { temperature: null, humidity: null }; // Initialize with null
 const initialSensorStatus: SensorStatus = { status: 'Initializing', ip: 'N/A' };
 
 const Home: NextPage = () => {
@@ -64,15 +65,19 @@ const Home: NextPage = () => {
            dataRes.json().catch(() => { throw new Error('Failed to parse data JSON')})
         ]);
 
-        // Basic validation
-        if (typeof dataJson.temperature !== 'number' || typeof dataJson.humidity !== 'number') {
-            throw new Error('Invalid data format received from sensor.');
-        }
+        // Basic validation - ensure values are numbers or null
+        const validatedData: SensorData = {
+            temperature: typeof dataJson.temperature === 'number' ? dataJson.temperature : null,
+            humidity: typeof dataJson.humidity === 'number' ? dataJson.humidity : null,
+        };
 
 
-        setSensorData(dataJson);
+        setSensorData(validatedData);
         setSensorStatus(statusJson);
-        setHistoricalData((prev) => [...prev.slice(-29), dataJson]); // Keep last 30 readings
+        // Add to history only if data is valid (not null)
+        if (validatedData.temperature !== null && validatedData.humidity !== null) {
+            setHistoricalData((prev) => [...prev.slice(-29), validatedData]); // Keep last 30 readings
+        }
         setError(null); // Clear previous errors on success
 
 
@@ -83,7 +88,9 @@ const Home: NextPage = () => {
         const [mockData, mockStatus] = await Promise.all([getMockSensorData(), getMockSensorStatus()]);
         setSensorData(mockData);
         setSensorStatus({...mockStatus, ip: 'N/A (Mock)'}); // Indicate mock data
-        setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        if (mockData.temperature !== null && mockData.humidity !== null) {
+            setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        }
         setUsingMockData(true);
       } finally {
         setLoadingData(false);
@@ -94,13 +101,15 @@ const Home: NextPage = () => {
         const [mockData, mockStatus] = await Promise.all([getMockSensorData(), getMockSensorStatus()]);
         setSensorData(mockData);
         setSensorStatus({...mockStatus, ip: 'N/A (Mock)'}); // Indicate mock data
-        setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        if (mockData.temperature !== null && mockData.humidity !== null) {
+             setHistoricalData((prev) => [...prev.slice(-29), mockData]);
+        }
         setUsingMockData(true);
         setError(null); // Clear error if previously set
       } catch (mockErr) {
           console.error('Error fetching mock sensor data:', mockErr);
           setError('Failed to fetch mock sensor data.');
-          setSensorData(initialSensorData);
+          setSensorData(initialSensorData); // Reset to initial null state
           setSensorStatus({ status: 'Error', ip: 'N/A'});
       } finally {
           setLoadingData(false);
@@ -109,32 +118,43 @@ const Home: NextPage = () => {
   }, [isClient]); // Added isClient dependency
 
 
-  const fetchSuggestions = useCallback(async (data: SensorData) => {
-     if (!isClient || !data || (data.temperature === 0 && data.humidity === 0)) return; // Don't fetch if no valid data or on server
+ const fetchSuggestions = useCallback(async (data: SensorData) => {
+    if (!isClient) return; // Don't run on server
+
+    // **Crucial check:** Only proceed if temperature and humidity are valid numbers.
+    if (data.temperature === null || data.humidity === null) {
+        console.warn('Skipping AI suggestions fetch: Sensor data contains null values.');
+        setSuggestions('Suggestions unavailable due to sensor reading error.');
+        setKidsSuggestions(['Suggestions unavailable.']);
+        setPetsSuggestions(['Suggestions unavailable.']);
+        setLoadingSuggestions(false); // Ensure loading state is turned off
+        return;
+    }
+
     setLoadingSuggestions(true);
     try {
-      // Use a default valid temp/humidity if current is 0,0 to avoid AI errors
-       const effectiveTemp = data.temperature === 0 && data.humidity === 0 ? 22 : data.temperature;
-       const effectiveHumidity = data.temperature === 0 && data.humidity === 0 ? 50 : data.humidity;
+        // Use the valid sensor data directly
+        const inputData = { temperature: data.temperature, humidity: data.humidity };
 
-      const [personalizedResult, kidsResult, petsResult] = await Promise.all([
-        generatePersonalizedSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity }),
-        generateKidsAndPetsSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity, mode: 'kids' }),
-        generateKidsAndPetsSuggestions({ temperature: effectiveTemp, humidity: effectiveHumidity, mode: 'pets' })
-      ]);
-      setSuggestions(personalizedResult.suggestions);
-      setKidsSuggestions(kidsResult.suggestions);
-      setPetsSuggestions(petsResult.suggestions);
+        const [personalizedResult, kidsResult, petsResult] = await Promise.all([
+            generatePersonalizedSuggestions(inputData),
+            generateKidsAndPetsSuggestions({ ...inputData, mode: 'kids' }),
+            generateKidsAndPetsSuggestions({ ...inputData, mode: 'pets' })
+        ]);
+
+        setSuggestions(personalizedResult.suggestions);
+        setKidsSuggestions(kidsResult.suggestions);
+        setPetsSuggestions(petsResult.suggestions);
     } catch (err) {
-      console.error('Error fetching AI suggestions:', err);
-      setSuggestions('Could not load suggestions at this time.');
-      setKidsSuggestions(['Could not load suggestions.']);
-      setPetsSuggestions(['Could not load suggestions.']);
-       // Optionally set a different error state for suggestions
+        console.error('Error fetching AI suggestions:', err);
+        setSuggestions('Could not load suggestions at this time.');
+        setKidsSuggestions(['Could not load suggestions.']);
+        setPetsSuggestions(['Could not load suggestions.']);
+        // Optionally set a different error state for suggestions
     } finally {
-      setLoadingSuggestions(false);
+        setLoadingSuggestions(false);
     }
-  }, [isClient]); // Added isClient dependency
+}, [isClient]);
 
 
    // Initial fetch and setup interval
@@ -149,15 +169,21 @@ const Home: NextPage = () => {
 
   // Fetch suggestions when sensor data (valid data) changes
   useEffect(() => {
-    // Only fetch if data is not the initial 0,0 state
-    if (isClient && (sensorData.temperature !== 0 || sensorData.humidity !== 0)) {
+    // Only fetch if data is valid (not null)
+    if (isClient && sensorData.temperature !== null && sensorData.humidity !== null) {
         fetchSuggestions(sensorData);
+    } else if (isClient) {
+        // Explicitly handle the case where data becomes null after being valid
+         setSuggestions('Suggestions unavailable due to sensor reading error.');
+         setKidsSuggestions(['Suggestions unavailable.']);
+         setPetsSuggestions(['Suggestions unavailable.']);
+         setLoadingSuggestions(false);
     }
   }, [sensorData, fetchSuggestions, isClient]); // Depend on sensorData, fetchSuggestions, and isClient
 
 
   const getGeneralSuggestion = useMemo(() => {
-    if (loadingData || !sensorData || (sensorData.temperature === 0 && sensorData.humidity === 0)) return null;
+    if (loadingData || sensorData.temperature === null || sensorData.humidity === null) return null;
 
     const { temperature, humidity } = sensorData;
 
@@ -174,7 +200,7 @@ const Home: NextPage = () => {
     } else if (humidity > 70) {
       return { icon: '💧', text: "High humidity! A dehumidifier might help prevent stuffiness." };
     }
-    return { icon: '쾌', text: "Conditions seem comfortable right now." }; // Changed icon
+    return { icon: '😊', text: "Conditions seem comfortable right now." }; // Changed icon
   }, [sensorData, loadingData]);
 
   // Render skeleton or minimal UI until client-side hydration
@@ -271,7 +297,7 @@ const Home: NextPage = () => {
                  <span className="text-xl">{getGeneralSuggestion.icon}</span>
                  <p className="text-sm text-secondary-foreground">{getGeneralSuggestion.text}</p>
                </div>
-             ) : error || (sensorData.temperature === 0 && sensorData.humidity === 0) ? (
+             ) : error || sensorData.temperature === null || sensorData.humidity === null ? (
                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <WifiOff className="h-4 w-4"/> Awaiting valid sensor data...
                </div>
@@ -340,7 +366,7 @@ const Home: NextPage = () => {
                {loadingSuggestions ? (
                  <div className="space-y-2 pt-2">
                     <Skeleton className="h-4 w-full" />
-                    <Skeleton className="4 w-[80%]" />
+                    <Skeleton className="h-4 w-[80%]" />
                  </div>
                ) : (
                 <ul className="list-disc pl-5 space-y-1 text-sm pt-2">
@@ -356,3 +382,5 @@ const Home: NextPage = () => {
 };
 
 export default Home;
+
+    
