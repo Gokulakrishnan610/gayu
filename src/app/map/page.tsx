@@ -71,9 +71,9 @@ const MapPage: React.FC = () => {
   const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center for Leaflet
   const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false); // Track if running on client
+  const [leafletLoaded, setLeafletLoaded] = useState(false); // Track Leaflet loading separately
 
-  // Fetch data functions remain the same...
-    const fetchCityTemperatures = async () => {
+  const fetchCityTemperatures = async () => {
     setLoadingCities(true);
     setError(null);
     try {
@@ -161,6 +161,7 @@ const MapPage: React.FC = () => {
     // Dynamically import Leaflet only on the client-side
     import('leaflet').then(leaflet => {
       L = leaflet;
+      setLeafletLoaded(true); // Mark Leaflet as loaded
       // Data fetching can now happen as Leaflet is available
       fetchCityTemperatures();
       fetchUserLocationAndSensor();
@@ -198,7 +199,7 @@ const MapPage: React.FC = () => {
 
   // Memoize icons to prevent recreation on every render
     const cityIcons = useMemo(() => {
-      if (!L) return {}; // Return empty if Leaflet not loaded
+      if (!L || !leafletLoaded) return {}; // Return empty if Leaflet not loaded
       return cityTemperatures.reduce((acc, city) => {
           const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
           if (icon) {
@@ -206,14 +207,14 @@ const MapPage: React.FC = () => {
           }
           return acc;
       }, {} as Record<string, LeafletIconType>);
-  }, [cityTemperatures]); // L dependency removed as it's checked inside
+  }, [cityTemperatures, leafletLoaded]); // Add leafletLoaded dependency
 
   const userIcon = useMemo(() => {
-      if (!userSensorData || !L) return null; // Check for L
+      if (!userSensorData || !L || !leafletLoaded) return null; // Check for L and leafletLoaded
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
-  }, [userSensorData]); // L dependency removed
+  }, [userSensorData, leafletLoaded]); // Add leafletLoaded dependency
 
-  const isLoading = loadingCities || loadingLocation || loadingSensor || !isClient || !L; // Ensure L is loaded
+  const isLoading = loadingCities || loadingLocation || loadingSensor || !isClient || !leafletLoaded; // Ensure Leaflet is loaded
 
   // Render nothing or a placeholder on the server
   if (!isClient) {
