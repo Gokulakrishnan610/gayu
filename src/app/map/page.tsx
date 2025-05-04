@@ -75,7 +75,8 @@ const MapPage: React.FC = () => {
 
   const fetchCityTemperatures = async () => {
     setLoadingCities(true);
-    setError(null);
+    // Keep existing error if it's critical (like Leaflet load failure)
+    // setError(null); // Don't clear critical errors
     try {
       const temperaturePromises = CITIES.map(city => getCityTemperature(city.name));
       const results = await Promise.all(temperaturePromises);
@@ -87,7 +88,7 @@ const MapPage: React.FC = () => {
       setCityTemperatures(dataWithCoords);
     } catch (err) {
       console.error('Error fetching city temperatures:', err);
-      setError('Failed to fetch city temperatures. Please try again later.');
+      setError((prev) => prev || 'Failed to fetch city temperatures. Please try again later.'); // Prioritize existing error
     } finally {
       setLoadingCities(false);
     }
@@ -96,7 +97,8 @@ const MapPage: React.FC = () => {
   const fetchUserLocationAndSensor = async () => {
     setLoadingLocation(true);
     setLoadingSensor(true);
-    setError(null);
+    // Keep existing error if critical
+    // setError(null);
     try {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
@@ -137,8 +139,7 @@ const MapPage: React.FC = () => {
                try {
                  const mockSensorData = await getSensorData(); // Fallback to mock on error
                   setUserSensorData(mockSensorData);
-               } catch (mockErr) {
-                  console.error('Failed fetching mock sensor data:', mockErr);
+               } catch (mockErr)                  console.error('Failed fetching mock sensor data:', mockErr);
                   setUserSensorData({ temperature: null, humidity: null });
                }
             } finally {
@@ -157,7 +158,7 @@ const MapPage: React.FC = () => {
       }
     } catch (err) {
        console.error('General error fetching location/sensor:', err);
-       setError('Failed to determine your location or fetch sensor data.');
+       setError((prev) => prev || 'Failed to determine your location or fetch sensor data.'); // Prioritize existing error
        setLoadingLocation(false);
        setLoadingSensor(false);
     }
@@ -226,25 +227,25 @@ const MapPage: React.FC = () => {
     ]).then(([leaflet, _]) => { // _ ignores the module object from the second import
       L = leaflet;
       // Fix default icon path issue in Leaflet with bundlers
-      // delete (L.Icon.Default.prototype as any)._getIconUrl; // Keep this if using default icons directly
-      // L.Icon.Default.mergeOptions({ // Keep this if using default icons directly
-      //   iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png').default,
-      //   iconUrl: require('leaflet/dist/images/marker-icon.png').default,
-      //   shadowUrl: require('leaflet/dist/images/marker-shadow.png').default,
-      // });
+       // delete (L.Icon.Default.prototype as any)._getIconUrl; // Keep this if using default icons directly
+       // L.Icon.Default.mergeOptions({ // Keep this if using default icons directly
+       //   iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png').default,
+       //   iconUrl: require('leaflet/dist/images/marker-icon.png').default,
+       //   shadowUrl: require('leaflet/dist/images/marker-shadow.png').default,
+       // });
       setLeafletLoaded(true); // Mark Leaflet as loaded
       // Data fetching can now happen as Leaflet is available
       fetchCityTemperatures();
       fetchUserLocationAndSensor();
     }).catch(error => {
          console.error("Failed to load Leaflet or compatibility script:", error);
-         setError("Map components could not be loaded.");
+         setError("Map components could not be loaded."); // Set critical error
          setLoadingCities(false);
          setLoadingLocation(false);
          setLoadingSensor(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Removed isClient from dependency array as it causes infinite loop
 
 
   const temperatureDifference = useMemo(() => {
@@ -291,7 +292,8 @@ const MapPage: React.FC = () => {
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
   }, [userSensorData, leafletLoaded]); // Add leafletLoaded dependency
 
-  const isLoading = loadingCities || loadingLocation || loadingSensor || !isClient || !leafletLoaded; // Ensure Leaflet is loaded
+  const isLoading = loadingCities || loadingLocation || loadingSensor; // Simplified loading state
+
 
   // Render nothing or a placeholder on the server
   if (!isClient) {
@@ -327,12 +329,21 @@ const MapPage: React.FC = () => {
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
               {/* Only render MapContainer when not loading AND leaflet is loaded */}
-              {isLoading ? (
+              {isLoading || !leafletLoaded ? (
                  <div className="absolute inset-0 w-full h-full bg-background/80 flex items-center justify-center z-10 rounded-b-lg">
-                    <Skeleton className="h-3/4 w-3/4" />
+                     {/* Show skeleton if loading, show error if leaflet failed */}
+                     {!leafletLoaded && error ? (
+                        <p className="text-destructive">{error}</p>
+                     ) : (
+                        <Skeleton className="h-3/4 w-3/4" />
+                     )}
                  </div>
-              ) : leafletLoaded ? ( // Render map only if leaflet is loaded and not loading data
+              ) : null /* Render nothing here, map is rendered below if ready */}
+
+              {/* Render MapContainer ONLY when client-side, Leaflet is loaded, and data is not initially loading */}
+               {isClient && leafletLoaded && !error && (
                    <MapContainer
+                     key={JSON.stringify(mapCenter)} // Force re-render on center change to avoid init error
                      center={mapCenter}
                      zoom={mapZoom}
                      scrollWheelZoom={true}
@@ -398,10 +409,6 @@ const MapPage: React.FC = () => {
                            </Marker>
                        )}
                    </MapContainer>
-                 ) : (
-                     <div className="absolute inset-0 w-full h-full bg-background/80 flex items-center justify-center z-10 rounded-b-lg">
-                          <p className="text-destructive">Map could not be loaded.</p>
-                     </div>
                  )}
           </CardContent>
         </Card>
@@ -457,3 +464,4 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
