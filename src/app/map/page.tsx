@@ -12,7 +12,8 @@ import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
 import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
-import MapWrapper from '@/components/map-wrapper';
+// Removed MapWrapper import
+// import MapWrapper from '@/components/map-wrapper';
 
 // Dynamically import react-leaflet components with ssr: false
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
@@ -54,10 +55,12 @@ const createCustomIcon = (
   // Only run if Leaflet is available
   if (typeof window === 'undefined' || !window.L) return null;
 
+  const L = window.L; // Access Leaflet from window
+
   const bgColorClass = color === 'primary' ? 'bg-primary' : 'bg-accent';
   const textColorClass = color === 'primary' ? 'text-primary-foreground' : 'text-accent-foreground';
 
-  return window.L.divIcon({
+  return L.divIcon({
     html: `<div class="${bgColorClass} ${textColorClass} rounded-full flex items-center justify-center shadow" style="width: ${size}px; height: ${size}px; font-size: ${fontSize}px; font-weight: bold;">${temperature.toFixed(0)}°</div>`,
     className: '', // Important: prevent default leaflet styles interfering
     iconSize: [size, size],
@@ -81,7 +84,7 @@ const MapPage: React.FC = () => {
   const mapRef = useRef<LeafletMap | null>(null); // Ref to store map instance
 
   // City and user icon states - need to be created client-side only
-  const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType>>({});
+  const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
   const [userIconState, setUserIconState] = useState<LeafletIconType | null>(null);
 
   const fetchCityTemperatures = useCallback(async () => {
@@ -285,11 +288,10 @@ const MapPage: React.FC = () => {
       // Create city icons
       const icons = cityTemperatures.reduce((acc, city) => {
         const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
-        if (icon) {
-          acc[city.city] = icon;
-        }
+        // Store icon or null in state
+        acc[city.city] = icon;
         return acc;
-      }, {} as Record<string, LeafletIconType>);
+      }, {} as Record<string, LeafletIconType | null>); // Allow null icons
       setCityIconsState(icons);
 
       // Create user icon
@@ -297,7 +299,7 @@ const MapPage: React.FC = () => {
         const icon = createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
         setUserIconState(icon);
       } else {
-        setUserIconState(null); // Reset if no temp data
+        setUserIconState(null); // Reset if no temp data or icon creation failed
       }
     }
   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
@@ -354,8 +356,13 @@ const MapPage: React.FC = () => {
             <CardDescription>Temperatures around the world and your location.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
-             <MapWrapper isLeafletLoaded={isClient && leafletLoaded} isLoading={isLoading}>
-                {isClient && leafletLoaded && MapContainer && (
+             {/* Simplified conditional rendering: Show Skeleton or MapContainer */}
+             {isLoading || !isClient || !leafletLoaded ? (
+                <Skeleton className="absolute inset-0 w-full h-full rounded-b-lg flex items-center justify-center bg-muted/80">
+                  <p>Loading Map...</p>
+                </Skeleton>
+             ) : (
+                MapContainer && ( // Ensure MapContainer is loaded
                    <MapContainer
                      center={mapCenter}
                      zoom={mapZoom}
@@ -371,12 +378,13 @@ const MapPage: React.FC = () => {
                      />
 
                      {/* City Markers */}
-                     {cityTemperatures.map((city) => (
-                       cityIconsState[city.city] ? (
+                     {cityTemperatures.map((city) => {
+                       const icon = cityIconsState[city.city];
+                       return icon ? (
                          <Marker
                            key={city.city}
                            position={[city.lat, city.lng]}
-                           icon={cityIconsState[city.city]}
+                           icon={icon}
                          >
                            <Popup>
                              <div className="p-1">
@@ -386,19 +394,21 @@ const MapPage: React.FC = () => {
                            </Popup>
                          </Marker>
                        ) : (
-                         <Marker key={city.city} position={[city.lat, city.lng]}>
-                           <Popup>
+                         // Fallback default marker if custom icon failed
+                         <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
+                            <Popup>
                              <div className="p-1">
                                <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
                              </div>
                            </Popup>
                          </Marker>
-                       )
-                     ))}
+                       );
+                     })}
+
 
                      {/* User Location Marker */}
-                     {userLocation && userSensorData && userSensorData.temperature !== null && userIconState && (
+                     {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
                        <Marker
                          key="user-location-marker"
                          position={[userLocation.lat, userLocation.lng]}
@@ -411,10 +421,7 @@ const MapPage: React.FC = () => {
                            </div>
                          </Popup>
                        </Marker>
-                     )}
-
-                     {/* Fallback default marker for user if custom icon fails or temp is null */}
-                     {userLocation && (!userIconState || (userSensorData && userSensorData.temperature === null)) && (
+                     ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
                        <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
                          <Popup>
                            <div className="p-1">
@@ -423,10 +430,10 @@ const MapPage: React.FC = () => {
                            </div>
                          </Popup>
                        </Marker>
-                     )}
+                     ) : null}
                    </MapContainer>
-                )}
-            </MapWrapper>
+                )
+             )}
           </CardContent>
         </Card>
 
