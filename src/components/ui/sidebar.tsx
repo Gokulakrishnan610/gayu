@@ -769,7 +769,8 @@ import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { VariantProps, cva } from 'class-variance-authority';
 import { PanelLeft, X } from 'lucide-react';
-import { useRouter } from 'next/navigation'; // Import useRouter for mobile nav closing
+import { usePathname, useRouter } from 'next/navigation'; // Import usePathname
+
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
@@ -834,15 +835,16 @@ const SidebarProvider = React.forwardRef<
     ref
   ) => {
     const isMobile = useIsMobile();
+    const pathname = usePathname(); // Get current pathname
     const [openMobile, _setOpenMobile] = React.useState(false);
-    const router = useRouter(); // Get router instance
 
-     // Close mobile sidebar on navigation
+     // Close mobile sidebar on navigation change
      React.useEffect(() => {
        if (isMobile) {
-         _setOpenMobile(false); // Close sidebar when route changes
+         _setOpenMobile(false); // Close sidebar when route (pathname) changes
        }
-     }, [isMobile, router]); // Add router as dependency if needed, though path changes implicitly trigger it
+     }, [isMobile, pathname]); // Depend on pathname
+
 
      const setOpenMobile = (value: boolean | ((value: boolean) => boolean)) => {
         const newState = typeof value === 'function' ? value(openMobile) : value;
@@ -1011,12 +1013,12 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
-             {/* Add a hidden title for accessibility */}
+             {/* Add a title for accessibility - SheetContent requires it */}
              <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
              {/* Sidebar content fills the sheet */}
             <div className="flex h-full w-full flex-col">
                  {children}
-                 {/* SheetClose button moved inside SidebarHeader */}
+                 {/* SheetClose button is automatically added by SheetContent */}
             </div>
           </SheetContent>
         </Sheet>
@@ -1192,28 +1194,18 @@ const SidebarHeader = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<'div'>
 >(({ className, ...props }, ref) => {
-   const { isMobile, setOpenMobile } = useSidebar();
+  // Removed isMobile and setOpenMobile as we rely on the default Sheet close button
   return (
     <div
       ref={ref}
       data-sidebar="header"
       className={cn(
-          'flex flex-col gap-2 shrink-0 relative', // Add relative for absolute positioning of close button
+          'flex flex-col gap-2 shrink-0 relative', // Keep relative for potential future use
           className
       )}
       {...props}
-    >
-       {/* Render SheetClose only on mobile */}
-       {isMobile && (
-           <SheetClose asChild>
-               <Button variant="ghost" size="icon" className="absolute top-2 right-2 z-50">
-                    <X className="h-5 w-5" />
-                    <span className="sr-only">Close</span>
-               </Button>
-           </SheetClose>
-       )}
-       {props.children}
-    </div>
+    />
+     // Removed the explicitly added SheetClose button
   );
 });
 SidebarHeader.displayName = 'SidebarHeader';
