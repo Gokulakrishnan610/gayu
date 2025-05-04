@@ -763,8 +763,6 @@
 // }
 
 
-
-
 'use client';
 
 import * as React from 'react';
@@ -778,7 +776,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { Sheet, SheetContent, SheetClose } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetClose, SheetTitle } from '@/components/ui/sheet'; // Import SheetTitle
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Tooltip,
@@ -1013,6 +1011,8 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
+             {/* Add a hidden title for accessibility */}
+             <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
              {/* Sidebar content fills the sheet */}
             <div className="flex h-full w-full flex-col">
                  {children}
@@ -1203,6 +1203,7 @@ const SidebarHeader = React.forwardRef<
       )}
       {...props}
     >
+       {/* Render SheetClose only on mobile */}
        {isMobile && (
            <SheetClose asChild>
                <Button variant="ghost" size="icon" className="absolute top-2 right-2 z-50">
