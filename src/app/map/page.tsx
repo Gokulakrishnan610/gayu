@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import type { LatLngExpression, Icon as LeafletIconType, Map as LeafletMap } from 'leaflet'; // Rename Icon to avoid conflict, import Map type
-// Removed: import 'leaflet-defaulticon-compatibility'; // Import the JS part - moved to dynamic import
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -236,12 +235,13 @@ const MapPage: React.FC = () => {
     // Cleanup function to remove map instance
     return () => {
         if (mapRef.current) {
-            console.log("Cleaning up map instance.");
-            mapRef.current.remove();
-            mapRef.current = null;
+            console.log("Cleaning up map instance on unmount.");
+            mapRef.current.remove(); // Remove the map instance itself
+            mapRef.current = null; // Clear the ref
         }
-        // Potentially reset leafletLoaded state if needed on unmount, though might not be necessary
-        // setLeafletLoaded(false);
+        // Potentially reset leafletLoaded state if needed on unmount
+        setLeafletLoaded(false);
+        setIsClient(false); // Reset client state if navigating away and back
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,9 +335,17 @@ const MapPage: React.FC = () => {
                     className="w-full h-full rounded-b-lg z-0"
                     style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
                     whenCreated={(mapInstance) => {
-                        mapRef.current = mapInstance; // Store map instance in ref
-                        // Optional: Invalidate size if tiles don't load correctly initially
-                        // setTimeout(() => mapInstance.invalidateSize(), 100);
+                        // Only set ref if it's null to avoid re-initialization issues
+                        if (!mapRef.current) {
+                            mapRef.current = mapInstance; // Store map instance in ref
+                             console.log("Map instance created and stored in ref.");
+                        } else {
+                            // If ref already exists, potentially update view but don't re-initialize
+                            console.log("Map instance already exists, updating view.");
+                            mapRef.current.setView(mapCenter, mapZoom);
+                        }
+                         // Optional: Invalidate size if tiles don't load correctly initially
+                         // setTimeout(() => mapInstance.invalidateSize(), 100);
                     }}
                   >
                      <MapUpdater center={mapCenter} zoom={mapZoom} />
@@ -458,3 +466,5 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
+
+    
