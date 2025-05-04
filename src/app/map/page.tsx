@@ -211,12 +211,18 @@ const MapPage: React.FC = () => {
                 window.L = leaflet;
 
                 if (window.L) {
-                    delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-                    window.L.Icon.Default.mergeOptions({
-                        iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-                        iconUrl: '/_next/static/media/marker-icon.png',
-                        shadowUrl: '/_next/static/media/marker-shadow.png',
-                    });
+                    // Check if Default icon prototype exists before trying to modify it
+                    if (window.L.Icon.Default?.prototype) {
+                        delete (window.L.Icon.Default.prototype as any)._getIconUrl;
+                        window.L.Icon.Default.mergeOptions({
+                            iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                            iconUrl: '/_next/static/media/marker-icon.png',
+                            shadowUrl: '/_next/static/media/marker-shadow.png',
+                        });
+                    } else {
+                        console.warn("L.Icon.Default.prototype not found. Skipping icon path merge.");
+                    }
+
 
                     // Dynamically import compatibility script client-side ONLY after L is defined
                     await import('leaflet-defaulticon-compatibility');
@@ -356,11 +362,12 @@ const MapPage: React.FC = () => {
                       console.log("Map instance already exists in ref, skipping assignment.");
                       // If an instance already exists, ensure the new one is cleaned up immediately
                       // This might happen in StrictMode's double-render
-                      try {
-                          mapInstance.remove();
-                      } catch (e) {
-                          console.warn("Error removing duplicate map instance:", e);
-                      }
+                      // try {
+                      //     mapInstance.remove();
+                      //     console.log("Removed duplicate map instance.");
+                      // } catch (e) {
+                      //     console.warn("Error removing duplicate map instance:", e);
+                      // }
                  }
              }}
              // whenReady is often more reliable than whenCreated for setup
@@ -510,5 +517,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
-    
