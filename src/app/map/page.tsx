@@ -1,3 +1,4 @@
+// src/app/map/page.tsx
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -84,6 +85,7 @@ const MapPage: React.FC = () => {
 
   const fetchCityTemperatures = useCallback(async () => {
     setLoadingCities(true);
+    setError(null); // Clear previous errors
     try {
       const temperaturePromises = CITIES.map(city => getCityTemperature(city.name));
       const results = await Promise.all(temperaturePromises);
@@ -95,7 +97,7 @@ const MapPage: React.FC = () => {
       setCityTemperatures(dataWithCoords);
     } catch (err) {
       console.error('Error fetching city temperatures:', err);
-      setError((prev) => prev || 'Failed to fetch city temperatures. Please try again later.');
+      setError((prev) => prev ? `${prev} Failed to fetch city temperatures.` : 'Failed to fetch city temperatures.');
     } finally {
       setLoadingCities(false);
     }
@@ -115,11 +117,15 @@ const MapPage: React.FC = () => {
           sensorData = await response.json();
         } catch (ipErr) {
           console.warn(`Failed fetching from ${storedIp}, using mock data.`, ipErr);
-          sensorData = await getSensorData();
+          sensorData = await getSensorData(); // Use mock on direct IP fetch error
           connectionError = 'Sensor connection failed.';
         }
       } else {
-        sensorData = await getSensorData();
+         console.log(forceMock ? 'Forcing mock sensor data fetch.' : 'No sensor IP, using mock data.');
+         sensorData = await getSensorData(); // Use mock if no IP or forced
+         if (!storedIp) {
+            connectionError = 'No sensor IP configured.';
+         }
       }
 
       const validatedData: SensorData = {
@@ -128,24 +134,31 @@ const MapPage: React.FC = () => {
       };
       setUserSensorData(validatedData);
       if (connectionError) {
-        setError((prev) => prev ? `${prev} ${connectionError}` : connectionError);
+         // Append connection error, avoiding duplicate messages
+         setError((prev) => {
+             const newError = connectionError || '';
+             if (!prev) return newError;
+             return prev.includes(newError) ? prev : `${prev} ${newError}`;
+         });
       }
     } catch (sensorErr) {
       console.error('Error fetching sensor data:', sensorErr);
       setError((prev) => prev ? `${prev} Failed to fetch sensor data.` : 'Failed to fetch sensor data.');
       try {
+        console.log('Fetching mock sensor data due to general sensor error.');
         const mockSensorData = await getSensorData();
          setUserSensorData(mockSensorData);
       } catch (mockErr){
            console.error('Failed fetching mock sensor data:', mockErr);
-           setUserSensorData({ temperature: null, humidity: null });
+           setUserSensorData({ temperature: null, humidity: null }); // Set to null on final fallback
        }
     } finally {
       setLoadingSensor(false);
     }
-  }, []);
+  }, []); // Removed error from dependencies to avoid loops
 
   const fetchLocationAndSensorFromAPI = useCallback(async () => {
+    setLoadingLocation(true); // Start location loading
     try {
       const location = await getCurrentLocation();
       setUserLocation(location);
@@ -154,16 +167,19 @@ const MapPage: React.FC = () => {
     } catch (locError) {
       console.error('Error fetching location from API:', locError);
       setError((prev) => prev ? `${prev} Failed to retrieve location.` : 'Failed to retrieve location.');
+      // Don't set userLocation, keep it null or previous value if any
     } finally {
-      setLoadingLocation(false);
+      setLoadingLocation(false); // Finish location loading
     }
 
+    // Fetch sensor data regardless of location success/failure
     await fetchSensorDataForLocation();
   }, [fetchSensorDataForLocation]);
 
   const fetchUserLocationAndSensor = useCallback(async () => {
     setLoadingLocation(true);
     setLoadingSensor(true);
+    setError(null); // Clear previous errors
 
     try {
       if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
@@ -173,25 +189,29 @@ const MapPage: React.FC = () => {
             setUserLocation(location);
             setMapCenter([location.lat, location.lng]);
             setMapZoom(10);
-            setLoadingLocation(false);
-            await fetchSensorDataForLocation();
+            setLoadingLocation(false); // Geolocation success
+            await fetchSensorDataForLocation(); // Fetch sensor after getting location
           },
           async (geoError) => {
             console.warn('Geolocation error:', geoError.message, 'Falling back to API.');
+            // Error handled by fetchLocationAndSensorFromAPI
             await fetchLocationAndSensorFromAPI();
+            // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
           },
           { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
         );
       } else {
         console.warn('Geolocation not supported, falling back to API.');
         await fetchLocationAndSensorFromAPI();
+        // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
       }
     } catch (err) {
-      console.error('General error fetching location/sensor:', err);
-      setError((prev) => prev || 'Failed to determine your location or fetch sensor data.');
-      setLoadingLocation(false);
+      // This catch block might be less necessary now errors are handled within the specific fetchers
+      console.error('General error in fetchUserLocationAndSensor:', err);
+      setError((prev) => prev || 'Failed to determine location or fetch sensor data.');
+      setLoadingLocation(false); // Ensure loading stops on unexpected error
       setLoadingSensor(false);
-      await fetchSensorDataForLocation(true); // Use mock data on general error
+      await fetchSensorDataForLocation(true); // Force mock data on general error
     }
   }, [fetchSensorDataForLocation, fetchLocationAndSensorFromAPI]);
 
@@ -201,7 +221,7 @@ const MapPage: React.FC = () => {
    }, []);
 
 
-   // Second useEffect: Handle Leaflet loading and initialization once client-side
+   // Second useEffect: Load Leaflet library and icons when client-side
    useEffect(() => {
        if (!isClient) return; // Only run on client
 
@@ -213,80 +233,79 @@ const MapPage: React.FC = () => {
                    const leaflet = await import('leaflet');
                    window.L = leaflet;
 
-                   // Apply compatibility fixes for default icons
-                   if (window.L) {
-                       delete (window.L.Icon.Default.prototype as any)._getIconUrl;
-                       window.L.Icon.Default.mergeOptions({
-                           iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
-                           iconUrl: '/_next/static/media/marker-icon.png',
-                           shadowUrl: '/_next/static/media/marker-shadow.png',
-                       });
+                   // Apply compatibility fixes for default icons *after* L is assigned
+                   delete (window.L.Icon.Default.prototype as any)._getIconUrl;
+                   window.L.Icon.Default.mergeOptions({
+                       iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+                       iconUrl: '/_next/static/media/marker-icon.png',
+                       shadowUrl: '/_next/static/media/marker-shadow.png',
+                   });
 
-                       // Import compatibility script only after Leaflet is loaded
-                       await import('leaflet-defaulticon-compatibility');
-                       leafletImported = true;
-                       setLeafletLoaded(true); // Mark Leaflet as fully loaded
-                       console.log("Leaflet and compatibility script loaded.");
-                   }
+                   // Import compatibility script only after Leaflet and fixes are loaded
+                   await import('leaflet-defaulticon-compatibility');
+                   leafletImported = true;
+                   setLeafletLoaded(true); // Mark Leaflet as fully loaded
+                   console.log("Leaflet and compatibility script loaded successfully.");
+
                } catch (error) {
                    console.error("Failed to load Leaflet or compatibility script:", error);
-                   setError("Map components could not be loaded.");
-                   // Stop loading indicators if Leaflet fails
-                   setLoadingCities(false);
+                   setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
+                   setLoadingCities(false); // Stop loading indicators if Leaflet fails
                    setLoadingLocation(false);
                    setLoadingSensor(false);
                }
-           } else if (typeof window !== 'undefined' && window.L) {
-               // Leaflet already exists (e.g., due to StrictMode double render), ensure compatibility is loaded
-               if (!leafletLoaded) { // Only load compatibility if not already marked as loaded
-                   try {
-                       await import('leaflet-defaulticon-compatibility');
-                       leafletImported = true;
-                       setLeafletLoaded(true);
-                       console.log("Leaflet compatibility script ensured on subsequent render.");
-                   } catch (error) {
-                       console.error("Failed to load Leaflet compatibility script (retry):", error);
-                       setError("Map components could not be loaded.");
-                   }
-               } else {
-                 leafletImported = true; // Already fully loaded
+           } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
+               // Leaflet might exist from a previous render (Strict Mode) but wasn't marked as loaded
+               try {
+                   await import('leaflet-defaulticon-compatibility'); // Ensure compatibility is run
+                   leafletImported = true;
+                   setLeafletLoaded(true); // Mark as loaded
+                   console.log("Leaflet compatibility ensured on subsequent render.");
+               } catch (error) {
+                   console.error("Failed to ensure Leaflet compatibility script (retry):", error);
+                    setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
                }
+           } else if (leafletLoaded) {
+                leafletImported = true; // Already loaded
            }
        };
 
-       loadLeaflet().then(() => {
-           // Only fetch data if Leaflet loaded successfully
-           if (leafletImported) {
-               if (cityTemperatures.length === 0) fetchCityTemperatures();
-               if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
-           }
-       });
+        loadLeaflet(); // Execute the load function
 
-       // Cleanup function for when the component unmounts or before re-running the effect
+       // Cleanup function for map instance - runs ONLY when the component unmounts
        return () => {
-           // This cleanup runs when the component unmounts or *before* the effect re-runs.
-           // Crucially, it attempts to clean up the map instance held in mapRef.
            if (mapRef.current) {
+               console.log("Attempting to remove map instance on component unmount.");
                try {
-                   console.log("Attempting to remove map instance during effect cleanup.");
                    mapRef.current.off(); // Unbind all event listeners
                    mapRef.current.remove(); // Clean up the Leaflet map instance
                    mapRef.current = null; // Explicitly nullify the ref
-                   console.log("Map instance removed successfully from effect cleanup.");
+                   console.log("Map instance removed successfully on unmount.");
                } catch (e) {
-                   console.warn("Error removing map during effect cleanup:", e);
+                   console.warn("Error removing map during unmount cleanup:", e);
                }
            }
        };
-    // Minimal deps to avoid unnecessary cleanup/rerun that might interfere with Strict Mode
-      }, [isClient, fetchCityTemperatures, fetchUserLocationAndSensor]);
+    // Dependency only on isClient ensures this runs once when client becomes true
+   }, [isClient]);
 
 
-   // Third useEffect: Update icons when data or Leaflet state changes
+   // Third useEffect: Fetch data *only* after Leaflet is loaded
+   useEffect(() => {
+       if (isClient && leafletLoaded) {
+           console.log("Leaflet loaded, fetching initial map data.");
+           fetchCityTemperatures();
+           fetchUserLocationAndSensor();
+       }
+       // Intentionally NOT depending on fetch functions to run only once after load
+   }, [isClient, leafletLoaded]); // Trigger data fetch when leaflet is ready
+
+
+   // Fourth useEffect: Update icons when data or Leaflet state changes
    useEffect(() => {
        // Only create icons on the client when Leaflet is fully loaded
        if (isClient && leafletLoaded && window.L) {
-            console.log("Updating icons because Leaflet is loaded and data changed.");
+            console.log("Updating map icons based on data change.");
            // Create city icons
            const icons = cityTemperatures.reduce((acc, city) => {
                const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
@@ -302,10 +321,10 @@ const MapPage: React.FC = () => {
                const icon = createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
                setUserIconState(icon);
            } else {
-               setUserIconState(null);
+               setUserIconState(null); // Reset if no temp data
            }
        }
-   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leafletLoaded
+   }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
 
 
   const temperatureDifference = useMemo(() => {
@@ -315,7 +334,8 @@ const MapPage: React.FC = () => {
     let minDistance = Infinity;
 
     cityTemperatures.forEach(city => {
-      if (!userLocation) return;
+      if (!userLocation) return; // Should not happen if userLocation is checked, but good practice
+      // Simple distance calculation (consider Haversine for real-world accuracy)
       const distance = Math.sqrt(
         Math.pow(userLocation.lat - city.lat, 2) + Math.pow(userLocation.lng - city.lng, 2)
       );
@@ -325,6 +345,7 @@ const MapPage: React.FC = () => {
       }
     });
 
+    // Check if nearestCity was found and userSensorData is valid
     if (!nearestCity || !userSensorData || userSensorData.temperature === null) return null;
 
     const diff = userSensorData.temperature - nearestCity.temperature;
@@ -361,11 +382,17 @@ const MapPage: React.FC = () => {
              className="w-full h-full rounded-b-lg z-0"
              style={{ backgroundColor: 'hsl(var(--muted))' }}
              whenCreated={mapInstance => {
-                 // This function is called by react-leaflet when the map is initialized.
-                 // It's generally safer than using a ref directly in strict mode.
                  // Store the map instance in the ref.
-                 mapRef.current = mapInstance;
-                 console.log("Map instance assigned via whenCreated.");
+                 // Avoid re-initializing if the ref already holds a map instance.
+                 // This helps mitigate the "Map container is already initialized" error, especially in Strict Mode.
+                 if (!mapRef.current) {
+                    mapRef.current = mapInstance;
+                    console.log("Map instance assigned via whenCreated.");
+                 } else {
+                    console.log("Map instance already exists in ref, skipping assignment.");
+                    // Optionally update view if needed, though MapUpdater should handle it
+                    // mapRef.current.setView(mapCenter, mapZoom);
+                 }
              }}
            >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
@@ -394,7 +421,7 @@ const MapPage: React.FC = () => {
                            <Popup>
                                 <div className="p-1">
                                 <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
+                                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p> {/* Handle potential null temp */}
                                 </div>
                            </Popup>
                       </Marker>
@@ -404,6 +431,7 @@ const MapPage: React.FC = () => {
               {/* User Location Marker */}
               {userLocation && userSensorData && userSensorData.temperature !== null && userIconState && (
                  <Marker
+                    key="user-location-marker" // Add a key
                     position={[userLocation.lat, userLocation.lng]}
                     icon={userIconState}
                  >
@@ -418,7 +446,7 @@ const MapPage: React.FC = () => {
 
               {/* Fallback default marker for user if custom icon fails or temp is null */}
               {userLocation && (!userIconState || (userSensorData && userSensorData.temperature === null)) && (
-                 <Marker position={[userLocation.lat, userLocation.lng]}>
+                 <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
                      <Popup>
                          <div className="p-1">
                          <h4 className="font-semibold text-sm mb-1">Your Location</h4>
@@ -513,5 +541,3 @@ const MapPage: React.FC = () => {
 };
 
 export default MapPage;
-
-    
