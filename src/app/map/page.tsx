@@ -7,8 +7,7 @@ import type { LatLngExpression, Icon as LeafletIconType, Map as LeafletMap } fro
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertTriangle, LocateFixed, MapPin, Thermometer } from 'lucide-react';
-import { getCityTemperature, CityTemperature } from '@/services/city-temperature';
+import { AlertTriangle, LocateFixed, Thermometer, Droplets } from 'lucide-react'; // Added Droplets
 import { getCurrentLocation, Location } from '@/services/location';
 import { getSensorData, SensorData } from '@/services/sensor';
 
@@ -26,86 +25,44 @@ declare global {
     }
 }
 
-interface CityData extends CityTemperature {
-  lat: number;
-  lng: number;
-}
-
-// Predefined cities with approximate coordinates
-const CITIES = [
-  { name: 'New York', lat: 40.7128, lng: -74.0060 },
-  { name: 'London', lat: 51.5074, lng: -0.1278 },
-  { name: 'Tokyo', lat: 35.6895, lng: 139.6917 },
-  { name: 'Sydney', lat: -33.8688, lng: 151.2093 },
-  { name: 'Paris', lat: 48.8566, lng: 2.3522 },
-  { name: 'Cairo', lat: 30.0444, lng: 31.2357 },
-];
-
-// Client-side icon creation function
+// Client-side icon creation function - Simplified for single marker
 const createCustomIcon = (
-  temperature: number,
+  temperature: number | null,
   color: 'primary' | 'accent',
-  size: number = 32,
+  size: number = 36,
   fontSize: number = 11,
-  textColor: 'primary-foreground' | 'accent-foreground' = 'accent-foreground'
+  textColor: 'primary-foreground' | 'accent-foreground' = 'primary-foreground'
 ): LeafletIconType | null => {
-  // Ensure Leaflet (L) is available on the window object
   if (typeof window === 'undefined' || !window.L) return null;
 
   const L = window.L;
   const bgColorClass = color === 'primary' ? 'bg-primary' : 'bg-accent';
   const textColorClass = color === 'primary' ? 'text-primary-foreground' : 'text-accent-foreground';
+  const displayValue = temperature !== null ? `${temperature.toFixed(0)}°` : '?';
 
   return L.divIcon({
-    html: `<div class="${bgColorClass} ${textColorClass} rounded-full flex items-center justify-center shadow" style="width: ${size}px; height: ${size}px; font-size: ${fontSize}px; font-weight: bold;">${temperature.toFixed(0)}°</div>`,
+    html: `<div class="${bgColorClass} ${textColorClass} rounded-full flex items-center justify-center shadow" style="width: ${size}px; height: ${size}px; font-size: ${fontSize}px; font-weight: bold;">${displayValue}</div>`,
     className: '', // Important: prevent default leaflet styles interfering
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
 };
 
-
 const MapPage: React.FC = () => {
-  const [cityTemperatures, setCityTemperatures] = useState<CityData[]>([]);
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [userSensorData, setUserSensorData] = useState<SensorData | null>(null);
-  const [loadingCities, setLoadingCities] = useState(true);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [loadingSensor, setLoadingSensor] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]);
-  const [mapZoom, setMapZoom] = useState(3);
+  const [mapCenter, setMapCenter] = useState<LatLngExpression>([20, 0]); // Default center
+  const [mapZoom, setMapZoom] = useState(3); // Default zoom
   const [isClient, setIsClient] = useState(false);
   const [leafletLoaded, setLeafletLoaded] = useState(false);
-  // Removed: const mapRef = useRef<LeafletMap | null>(null); // Ref is no longer needed
-
-  // City and user icon states - need to be created client-side only
-  const [cityIconsState, setCityIconsState] = useState<Record<string, LeafletIconType | null>>({});
   const [userIconState, setUserIconState] = useState<LeafletIconType | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
 
 
-  const fetchCityTemperatures = useCallback(async () => {
-    setLoadingCities(true);
-    setError(null); // Clear previous errors
-    try {
-      const temperaturePromises = CITIES.map(city => getCityTemperature(city.name));
-      const results = await Promise.all(temperaturePromises);
-      const dataWithCoords = results.map((tempData, index) => ({
-        ...tempData,
-        lat: CITIES[index].lat,
-        lng: CITIES[index].lng,
-      }));
-      setCityTemperatures(dataWithCoords);
-    } catch (err) {
-      console.error('Error fetching city temperatures:', err);
-      setError((prev) => prev ? `${prev} Failed to fetch city temperatures.` : 'Failed to fetch city temperatures.');
-    } finally {
-      setLoadingCities(false);
-    }
-  }, []);
-
-
-   const fetchSensorDataForLocation = useCallback(async (forceMock = false) => {
+  const fetchSensorDataForLocation = useCallback(async (forceMock = false) => {
     setLoadingSensor(true);
     try {
       const storedIp = typeof window !== 'undefined' ? localStorage.getItem('sensorIp') : null;
@@ -136,7 +93,6 @@ const MapPage: React.FC = () => {
       };
       setUserSensorData(validatedData);
       if (connectionError) {
-         // Append connection error, avoiding duplicate messages
          setError((prev) => {
              const newError = connectionError || '';
              if (!prev) return newError;
@@ -163,14 +119,14 @@ const MapPage: React.FC = () => {
    const fetchLocationAndSensorFromAPI = useCallback(async () => {
     setLoadingLocation(true); // Start location loading
     try {
-      const location = await getCurrentLocation();
+      const location = await getCurrentLocation(); // Using mock/API location
       setUserLocation(location);
       setMapCenter([location.lat, location.lng]);
-      setMapZoom(10);
+      setMapZoom(10); // Zoom in on API-based location
     } catch (locError) {
       console.error('Error fetching location from API:', locError);
       setError((prev) => prev ? `${prev} Failed to retrieve location.` : 'Failed to retrieve location.');
-      // Don't set userLocation, keep it null or previous value if any
+      // Keep map at default view if location fails
     } finally {
       setLoadingLocation(false); // Finish location loading
     }
@@ -178,6 +134,7 @@ const MapPage: React.FC = () => {
     // Fetch sensor data regardless of location success/failure
     await fetchSensorDataForLocation();
   }, [fetchSensorDataForLocation]);
+
 
   const fetchUserLocationAndSensor = useCallback(async () => {
     setLoadingLocation(true);
@@ -191,28 +148,24 @@ const MapPage: React.FC = () => {
             const location: Location = { lat: position.coords.latitude, lng: position.coords.longitude };
             setUserLocation(location);
             setMapCenter([location.lat, location.lng]);
-            setMapZoom(10);
+            setMapZoom(13); // Zoom in closer for accurate geolocation
             setLoadingLocation(false); // Geolocation success
             await fetchSensorDataForLocation(); // Fetch sensor after getting location
           },
           async (geoError) => {
-            console.warn('Geolocation error:', geoError.message, 'Falling back to API.');
-            // Error handled by fetchLocationAndSensorFromAPI
+            console.warn('Geolocation error:', geoError.message, 'Falling back to API location.');
             await fetchLocationAndSensorFromAPI();
-            // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
           },
-          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 } // Higher accuracy
         );
       } else {
-        console.warn('Geolocation not supported, falling back to API.');
+        console.warn('Geolocation not supported, falling back to API location.');
         await fetchLocationAndSensorFromAPI();
-        // setLoadingLocation(false) is handled within fetchLocationAndSensorFromAPI
       }
     } catch (err) {
-      // This catch block might be less necessary now errors are handled within the specific fetchers
       console.error('General error in fetchUserLocationAndSensor:', err);
       setError((prev) => prev || 'Failed to determine location or fetch sensor data.');
-      setLoadingLocation(false); // Ensure loading stops on unexpected error
+      setLoadingLocation(false);
       setLoadingSensor(false);
       await fetchSensorDataForLocation(true); // Force mock data on general error
     }
@@ -225,127 +178,87 @@ const MapPage: React.FC = () => {
 
   // Effect 2: Load Leaflet library and compatibility scripts client-side
   useEffect(() => {
-    if (!isClient) return; // Only run on client
+    if (!isClient) return;
 
     const loadLeaflet = async () => {
-        // Ensure Leaflet and its assets are only loaded client-side
         if (typeof window !== 'undefined' && !window.L) {
-          const L = (await import('leaflet')).default; // Dynamically import leaflet client-side
-          window.L = L; // Assign to window for compatibility if needed elsewhere
+          const L = (await import('leaflet')).default;
+          window.L = L;
 
-          // Apply compatibility fixes for default icons *after* L is assigned
+          // Apply compatibility fixes *after* L is assigned
           delete (L.Icon.Default.prototype as any)._getIconUrl;
           L.Icon.Default.mergeOptions({
-            iconRetinaUrl: '/_next/static/media/marker-icon-2x.png', // Path adjusted for webpack copy plugin output
-            iconUrl: '/_next/static/media/marker-icon.png',        // Path adjusted
-            shadowUrl: '/_next/static/media/marker-shadow.png',      // Path adjusted
+             // Use relative paths that CopyPlugin makes available
+             iconRetinaUrl: '/_next/static/media/marker-icon-2x.png',
+             iconUrl: '/_next/static/media/marker-icon.png',
+             shadowUrl: '/_next/static/media/marker-shadow.png',
           });
 
-          // Dynamically import compatibility script only after Leaflet and fixes are loaded
           await import('leaflet-defaulticon-compatibility');
 
-          setLeafletLoaded(true); // Mark Leaflet as fully loaded
+          setLeafletLoaded(true);
           console.log("Leaflet and compatibility script loaded successfully.");
-
-        } else if (typeof window !== 'undefined' && window.L) {
-            // If L is already on window (e.g., StrictMode re-run), ensure loaded state is true
-            if (!leafletLoaded) { // Only set state if it's currently false
-                 setLeafletLoaded(true);
-                 console.log("Leaflet already loaded, ensuring state is set.");
-            }
-        } else {
-          console.error("Attempted to load Leaflet on server.");
-          setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
-          setLoadingCities(false);
-          setLoadingLocation(false);
-          setLoadingSensor(false);
+        } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
+             setLeafletLoaded(true);
+             console.log("Leaflet already loaded, ensuring state is set.");
         }
     };
 
-     // Only attempt to load if not already loaded
-     if (!leafletLoaded && typeof window !== 'undefined') {
+     if (!leafletLoaded) {
         loadLeaflet().catch(error => {
             console.error("Failed during Leaflet loading process:", error);
              setError((prev) => prev ? `${prev} Map components failed to load.` : "Map components failed to load.");
         });
      }
 
-  }, [isClient, leafletLoaded]); // Dependency ensures this logic runs when client becomes true or leafletLoaded changes
+  }, [isClient, leafletLoaded]);
 
   // Effect 3: Fetch data *only* after Leaflet is loaded client-side
   useEffect(() => {
     if (isClient && leafletLoaded) {
       console.log("Leaflet loaded, fetching initial map data.");
-      fetchCityTemperatures();
       fetchUserLocationAndSensor();
     }
-    // Intentionally NOT depending on fetch functions to run only once after load
-  }, [isClient, leafletLoaded]); // Trigger data fetch when leaflet is ready
+  }, [isClient, leafletLoaded, fetchUserLocationAndSensor]); // Added fetchUserLocationAndSensor dependency
 
-  // Effect 4: Update icons when data or Leaflet state changes (client-side only)
+  // Effect 4: Update user icon when sensor data or Leaflet state changes
   useEffect(() => {
-    // Only create icons on the client when Leaflet is fully loaded
     if (isClient && leafletLoaded) {
-      console.log("Updating map icons based on data change.");
-      // Create city icons
-      const icons = cityTemperatures.reduce((acc, city) => {
-        const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
-        // Store icon or null in state
-        acc[city.city] = icon;
-        return acc;
-      }, {} as Record<string, LeafletIconType | null>); // Allow null icons
-      setCityIconsState(icons);
+      // Use temperature from userSensorData, can be null
+      const icon = createCustomIcon(userSensorData?.temperature ?? null, 'primary');
+      setUserIconState(icon);
+    }
+  }, [userSensorData, isClient, leafletLoaded]);
 
-      // Create user icon
-      if (userSensorData && userSensorData.temperature !== null) {
-        const icon = createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
-        setUserIconState(icon);
-      } else {
-        setUserIconState(null); // Reset if no temp data or icon creation failed
+  // Effect 5: Cleanup map instance on component unmount
+  useEffect(() => {
+    // Return a cleanup function
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove(); // Properly remove the map instance
+        mapRef.current = null;
+        console.log("Leaflet map instance removed.");
+      }
+    };
+  }, []); // Empty dependency array ensures this runs only on unmount
+
+  // Callback ref to get the map instance
+  const mapRefCb = useCallback((node: LeafletMap | null) => {
+    if (node !== null) {
+      // Prevent re-initializing if ref callback is called again by React StrictMode
+      if (!mapRef.current) {
+        mapRef.current = node;
+        console.log("Leaflet map instance obtained.");
       }
     }
-  }, [cityTemperatures, userSensorData, isClient, leafletLoaded]); // Depend on data and leaflet state
+  }, []);
 
-  // Removed: const mapRefCb = useCallback((node: LeafletMap | null) => {...});
-  // Removed: useEffect(() => { return () => {...} }, []); // Cleanup effect
+  const isLoading = loadingLocation || loadingSensor;
 
-
-  const temperatureDifference = useMemo(() => {
-    if (!userLocation || !userSensorData || cityTemperatures.length === 0 || userSensorData.temperature === null) return null;
-
-    let nearestCity: CityData | null = null;
-    let minDistance = Infinity;
-
-    cityTemperatures.forEach(city => {
-      if (!userLocation) return; // Should not happen if userLocation is checked, but good practice
-      // Simple distance calculation (consider Haversine for real-world accuracy)
-      const distance = Math.sqrt(
-        Math.pow(userLocation.lat - city.lat, 2) + Math.pow(userLocation.lng - city.lng, 2)
-      );
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestCity = city;
-      }
-    });
-
-    // Check if nearestCity was found and userSensorData is valid
-    if (!nearestCity || !userSensorData || userSensorData.temperature === null) return null;
-
-    const diff = userSensorData.temperature - nearestCity.temperature;
-    return {
-      city: nearestCity.name,
-      difference: diff.toFixed(1),
-      comparison: diff > 0 ? 'warmer' : diff < 0 ? 'cooler' : 'similar',
-    };
-  }, [userLocation, userSensorData, cityTemperatures]);
-
-  const isLoading = loadingCities || loadingLocation || loadingSensor;
-
-  // Render map content (markers, popups, etc.)
+  // Render map content (marker, popup, etc.)
   const renderMapContent = () => {
-    // Components are dynamically imported, check if they are loaded.
-    if (!MapUpdater || !TileLayer || !Marker || !Popup) {
-      return null; // Or a loading indicator specific to content
+    if (!TileLayer || !Marker || !Popup || !MapUpdater) {
+      return null;
     }
 
     return (
@@ -356,47 +269,24 @@ const MapPage: React.FC = () => {
           url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
         />
 
-        {/* City Markers */}
-        {cityTemperatures.map((city) => {
-          const icon = cityIconsState[city.city];
-          return icon ? (
-            <Marker key={city.city} position={[city.lat, city.lng]} icon={icon}>
-              <Popup>
-                <div className="p-1">
-                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature.toFixed(1)}°C</p>
-                </div>
-              </Popup>
-            </Marker>
-          ) : (
-            // Fallback default marker if custom icon failed
-            <Marker key={city.city + '-fallback'} position={[city.lat, city.lng]}>
-               <Popup>
-                <div className="p-1">
-                  <h4 className="font-semibold text-sm mb-1">{city.city}</h4>
-                  <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{city.temperature?.toFixed(1) ?? 'N/A'}°C</p>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-
         {/* User Location Marker */}
-        {userLocation && userSensorData && userSensorData.temperature !== null && userIconState ? (
-          <Marker key="user-location-marker" position={[userLocation.lat, userLocation.lng]} icon={userIconState}>
+        {userLocation ? (
+          <Marker
+            key="user-location"
+            position={[userLocation.lat, userLocation.lng]}
+            icon={userIconState ?? undefined} // Use custom icon or fallback to default
+          >
             <Popup>
               <div className="p-1">
                 <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData.temperature.toFixed(1)}°C</p>
-              </div>
-            </Popup>
-          </Marker>
-        ) : userLocation ? ( // Show default marker if user location exists but icon failed or temp is null
-          <Marker key="user-location-fallback" position={[userLocation.lat, userLocation.lng]}>
-            <Popup>
-              <div className="p-1">
-                <h4 className="font-semibold text-sm mb-1">Your Location</h4>
-                <p className="text-xs"><Thermometer className="inline h-3 w-3 mr-1" />{userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C</p>
+                <p className="text-xs flex items-center gap-1 mb-0.5">
+                  <Thermometer className="h-3 w-3" />
+                  Temp: {userSensorData?.temperature?.toFixed(1) ?? 'N/A'}°C
+                </p>
+                <p className="text-xs flex items-center gap-1">
+                  <Droplets className="h-3 w-3" />
+                  Humidity: {userSensorData?.humidity?.toFixed(1) ?? 'N/A'}%
+                </p>
               </div>
             </Popup>
           </Marker>
@@ -408,7 +298,7 @@ const MapPage: React.FC = () => {
   // Main render structure
   return (
     <div className="container mx-auto p-4 md:p-8">
-      <h1 className="text-3xl font-bold mb-6 text-primary">Global Temperature Map</h1>
+      <h1 className="text-3xl font-bold mb-6 text-primary">Sensor Location Map</h1>
 
       {error && (
         <Alert variant="destructive" className="mb-6">
@@ -421,22 +311,19 @@ const MapPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Temperature Overview</CardTitle>
-            <CardDescription>Temperatures around the world and your location.</CardDescription>
+            <CardTitle>Sensor Map</CardTitle>
+            <CardDescription>Your sensor's location and current readings.</CardDescription>
           </CardHeader>
           <CardContent className="h-[500px] p-0 relative">
              {/* Conditionally render MapContainer only when on client and leaflet is loaded */}
              {isClient && leafletLoaded && MapContainer ? (
-                 // MapContainer is rendered inside the div
                  <MapContainer
-                   // Removed: ref={mapRefCb}
+                   ref={mapRefCb} // Use the callback ref to get the instance
                    center={mapCenter}
                    zoom={mapZoom}
                    scrollWheelZoom={true}
                    className="w-full h-full z-0"
                    style={{ backgroundColor: 'hsl(var(--muted))' }}
-                   // whenCreated is deprecated in react-leaflet v4, use ref callback instead
-                   // removed key prop
                  >
                    {renderMapContent()}
                  </MapContainer>
@@ -452,7 +339,7 @@ const MapPage: React.FC = () => {
              {isClient && leafletLoaded && isLoading && (
                 <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-muted/80 rounded-b-lg z-10">
                    <Skeleton className="w-full h-full">
-                      <p className="text-center p-4">Fetching Map Data...</p>
+                      <p className="text-center p-4">Fetching Sensor Data...</p>
                    </Skeleton>
                 </div>
              )}
@@ -461,8 +348,8 @@ const MapPage: React.FC = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Your Location Details</CardTitle>
-            <CardDescription>Your current sensor readings and comparison.</CardDescription>
+            <CardTitle>Sensor Details</CardTitle>
+            <CardDescription>Your current sensor readings.</CardDescription>
           </CardHeader>
           <CardContent>
             {loadingLocation || loadingSensor ? (
@@ -470,7 +357,7 @@ const MapPage: React.FC = () => {
                 <Skeleton className="h-6 w-3/4" />
                 <Skeleton className="h-4 w-1/2" />
                 <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/2" />
+                 <Skeleton className="h-4 w-1/2" />
               </div>
             ) : userLocation && userSensorData ? (
               <div className="space-y-3">
@@ -483,23 +370,19 @@ const MapPage: React.FC = () => {
                 <p className="flex items-center gap-2">
                   <Thermometer className="h-5 w-5 text-accent" />
                   <span className="font-semibold">{userSensorData.temperature?.toFixed(1) ?? 'N/A'}°C</span>
-                  <span className="text-sm text-muted-foreground">(Your Sensor)</span>
+                  <span className="text-sm text-muted-foreground">(Sensor Temp)</span>
                 </p>
                 <p className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-muted-foreground" />
-                  {temperatureDifference ? (
-                    <span className="text-sm">
-                      {Math.abs(parseFloat(temperatureDifference.difference))}°C {temperatureDifference.comparison} than {temperatureDifference.city}.
-                    </span>
-                  ) : userSensorData.temperature === null ? (
-                    <span className="text-sm text-muted-foreground">Comparison unavailable (sensor error).</span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Comparing data...</span>
-                  )}
+                  <Droplets className="h-5 w-5 text-primary" />
+                   <span className="font-semibold">{userSensorData.humidity?.toFixed(1) ?? 'N/A'}%</span>
+                   <span className="text-sm text-muted-foreground">(Sensor Humidity)</span>
                 </p>
+                 <p className="text-xs text-muted-foreground pt-2">
+                     Sensor IP: {localStorage.getItem('sensorIp') || 'Not Configured (Using Mock)'}
+                 </p>
               </div>
             ) : (
-              <p className="text-muted-foreground">Could not retrieve your location or sensor data.</p>
+              <p className="text-muted-foreground">Could not retrieve location or sensor data.</p>
             )}
           </CardContent>
         </Card>

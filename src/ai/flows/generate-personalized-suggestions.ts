@@ -11,9 +11,10 @@
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
-import {getCityTemperature} from '@/services/city-temperature';
-import {getCurrentLocation} from '@/services/location';
-import {getSensorData} from '@/services/sensor';
+// Removed unused imports:
+// import {getCityTemperature} from '@/services/city-temperature'; // No longer used
+// import {getCurrentLocation} from '@/services/location'; // No longer used
+// import {getSensorData} from '@/services/sensor'; // No longer used
 
 const PersonalizedSuggestionsInputSchema = z.object({
   temperature: z.number().describe('The current temperature in Celsius.'),
@@ -37,12 +38,18 @@ export type PersonalizedSuggestionsOutput = z.infer<
 export async function generatePersonalizedSuggestions(
   input: PersonalizedSuggestionsInput
 ): Promise<PersonalizedSuggestionsOutput> {
+    // Check for null values before calling the flow
+    if (input.temperature === null || input.humidity === null) {
+        console.warn('generatePersonalizedSuggestions: Input contains null values, returning default message.');
+        return { suggestions: 'Suggestions unavailable due to sensor reading error.' };
+    }
   return generatePersonalizedSuggestionsFlow(input);
 }
 
 const generateSuggestionsPrompt = ai.definePrompt({
   name: 'generateSuggestionsPrompt',
   input: {
+    // Input schema remains the same, expecting numbers
     schema: z.object({
       temperature: z.number().describe('The current temperature in Celsius.'),
       humidity: z.number().describe('The current humidity percentage.'),
