@@ -220,6 +220,7 @@ const MapPage: React.FC = () => {
                 // Import compatibility JS after Leaflet and its options are set
                 import('leaflet-defaulticon-compatibility').then(() => {
                      setLeafletLoaded(true); // Mark Leaflet as fully loaded
+                     // Initial data fetch only after Leaflet is fully ready
                      fetchCityTemperatures();
                      fetchUserLocationAndSensor();
                 }).catch(error => {
@@ -238,40 +239,39 @@ const MapPage: React.FC = () => {
              setError("Map components could not be loaded.");
              setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
         });
-    } else if (typeof window !== 'undefined' && window.L) {
-        // Leaflet already loaded, ensure compatibility script is also done
-        if (!leafletLoaded) {
-             import('leaflet-defaulticon-compatibility').then(() => {
-                 setLeafletLoaded(true); // Mark Leaflet as fully loaded
-                 if (cityTemperatures.length === 0) fetchCityTemperatures();
-                 if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
-             }).catch(error => {
-                 console.error("Failed to load Leaflet compatibility script (retry):", error);
-                 setError("Map components could not be loaded.");
-                 setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
-             });
-        } else {
-            // Already fully loaded, fetch data if needed
-            if (cityTemperatures.length === 0) fetchCityTemperatures();
-            if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
-        }
+    } else if (typeof window !== 'undefined' && window.L && leafletLoaded) {
+        // Leaflet and compatibility script already loaded, fetch data if needed
+        if (cityTemperatures.length === 0) fetchCityTemperatures();
+        if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
+    } else if (typeof window !== 'undefined' && window.L && !leafletLoaded) {
+         // Leaflet loaded, but compatibility script might not be (edge case)
+         import('leaflet-defaulticon-compatibility').then(() => {
+             setLeafletLoaded(true); // Mark Leaflet as fully loaded
+             if (cityTemperatures.length === 0) fetchCityTemperatures();
+             if (!userLocation || !userSensorData) fetchUserLocationAndSensor();
+         }).catch(error => {
+              console.error("Failed to load Leaflet compatibility script (retry):", error);
+              setError("Map components could not be loaded.");
+              setLoadingCities(false); setLoadingLocation(false); setLoadingSensor(false);
+         });
     }
 
-     // Cleanup map instance on component unmount
-     return () => {
-         if (mapRef.current) {
+    // Cleanup function to remove the map instance when the component unmounts or before re-rendering in StrictMode
+    return () => {
+        if (mapRef.current) {
+             console.log("Attempting to remove map instance.");
              try {
-                 mapRef.current.remove(); // Remove the map instance
+                 mapRef.current.remove(); // Remove the map instance cleanly
              } catch (e) {
-                console.warn("Error removing map instance:", e);
+                console.warn("Error removing map instance during cleanup:", e);
              } finally {
-                mapRef.current = null; // Nullify the ref regardless of error
+                mapRef.current = null; // Nullify the ref after removal attempt
+                console.log("Map instance reference set to null.");
              }
          }
      };
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isClient]); // Run only once when client-side is confirmed
+  }, [isClient]); // Only run on initial client confirmation
 
 
   const temperatureDifference = useMemo(() => {
@@ -303,8 +303,7 @@ const MapPage: React.FC = () => {
 
   // Memoize icons to prevent recreation on every render
     const cityIcons = useMemo(() => {
-      // Check isClient first before accessing window
-      if (!isClient || !window.L || !leafletLoaded) return {}; // Return empty if not ready
+      if (!isClient || !window.L || !leafletLoaded) return {}; // Ensure client-side and Leaflet loaded
       return cityTemperatures.reduce((acc, city) => {
           const icon = createCustomIcon(city.temperature, 'accent', 30, 10);
           if (icon) {
@@ -315,13 +314,11 @@ const MapPage: React.FC = () => {
   }, [cityTemperatures, leafletLoaded, isClient]); // Add isClient dependency
 
   const userIcon = useMemo(() => {
-      // Check isClient first before accessing window
-      if (!isClient || !userSensorData || userSensorData.temperature === null || !window.L || !leafletLoaded) return null; // Check for L and leafletLoaded
+      if (!isClient || !userSensorData || userSensorData.temperature === null || !window.L || !leafletLoaded) return null; // Check client, data, L, and leafletLoaded
       return createCustomIcon(userSensorData.temperature, 'primary', 36, 12, 'primary-foreground');
   }, [userSensorData, leafletLoaded, isClient]); // Add isClient dependency
 
-  const isLoading = loadingCities || loadingLocation || loadingSensor || !leafletLoaded; // Include leafletLoaded in loading state
-
+  const isLoading = loadingCities || loadingLocation || loadingSensor; // Removed !leafletLoaded here, handle rendering separately
 
   // Render skeleton or minimal UI until client-side hydration and Leaflet loaded
   const renderMapOrSkeleton = () => {
@@ -342,20 +339,16 @@ const MapPage: React.FC = () => {
             className="w-full h-full rounded-b-lg z-0"
             style={{ backgroundColor: 'hsl(var(--muted))' }} // Match background
             whenCreated={(mapInstance) => {
-                 // Only set the ref if it's not already set
-                 if (!mapRef.current) {
+                // Assign the map instance to the ref.
+                // This replaces the previous approach using useState for the map instance.
+                if (mapRef.current === null) { // Check if ref is not already set
+                     console.log("Map instance created and assigned to ref.");
                      mapRef.current = mapInstance;
-                 } else {
-                    // If ref is already set, it means we might be in a hot-reload scenario
-                    // or StrictMode double-render. Try to remove the old one first.
-                    // This is a workaround for the "already initialized" error.
-                    try {
-                        mapRef.current.remove();
-                    } catch (e) {
-                       console.warn("Error removing existing map instance before recreation:", e);
-                    }
-                    mapRef.current = mapInstance; // Reassign ref to the new instance
-                 }
+                } else {
+                    // This case might happen with React StrictMode double-invocation or hot-reloading.
+                    // We log it but don't re-assign if the ref already exists, preventing issues.
+                    console.warn("whenCreated called but mapRef.current already exists. Ignoring re-assignment.");
+                }
             }}
           >
              <MapUpdater center={mapCenter} zoom={mapZoom} />
