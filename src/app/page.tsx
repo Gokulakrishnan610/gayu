@@ -447,8 +447,8 @@ const Home: NextPage = () => {
     try {
         if (currentIp) {
             const [statusRes, dataRes] = await Promise.all([
-                fetch(`http://${currentIp}/status`).catch(e => { throw new Error(`Status fetch failed: ${e.message}`)}),
-                fetch(`http://${currentIp}/data`).catch(e => { throw new Error(`Data fetch failed: ${e.message}`)})
+                fetch(`http://${currentIp}/api/status`).catch(e => { throw new Error(`Status fetch failed: ${e.message}`)}),
+                fetch(`http://${currentIp}/api/data`).catch(e => { throw new Error(`Data fetch failed: ${e.message}`)})
             ]);
 
             if (!statusRes.ok || !dataRes.ok) {
