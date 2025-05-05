@@ -76,8 +76,8 @@ const Home: NextPage = () => {
         if (currentIp) {
             // console.log(`Fetching data/status from real sensor: ${currentIp}`);
             // Use http:// for local ESP32 communication
-            const statusUrl = `https://${currentIp}/api/status` || `http://${currentIp}/api/status`;
-            const dataUrl = `https://${currentIp}/api/data`|| `http://${currentIp}/api/data`;
+            const statusUrl = `https://${currentIp}/api/status`;
+            const dataUrl = `https://${currentIp}/api/data`;
 
             const [statusRes, dataRes] = await Promise.all([
                 fetch(statusUrl).catch(e => { throw new Error(`Status fetch failed: ${e.message}`)}),
