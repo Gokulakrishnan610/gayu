@@ -843,7 +843,7 @@ const MapPage: React.FC = () => {
       // Attempt to fetch from the real sensor IP
       try {
         // console.log(`Attempting to fetch from real sensor at ${currentIp}...`);
-        const response = await fetch(`http://${currentIp}/api/data`);
+        const response = await fetch(`https://${currentIp}/api/data`);
         if (!response.ok) {
           throw new Error(`Sensor responded with status ${response.status}`);
         }
